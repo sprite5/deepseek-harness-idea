@@ -10,7 +10,7 @@
 
 | 项 | 结论 |
 |---|---|
-| 目标 IDE | IntelliJ IDEA Community/Ultimate **2024.1+**（`intellij.version = 2024.1.7`，since-build 241，until 251.*） |
+| 目标 IDE | IntelliJ IDEA Community/Ultimate **2024.1+**（`intellij.version = 2024.1.7`，since-build 241，until **262.\***；可用 `-PplatformVersion=2026.2` 做前向编译检查） |
 | 构建 JDK | **必须 JBR 21**：`D:\develop\IntelliJ IDEA 2024.3.4.1\jbr`（`instrumentCode` 需要 JBR 布局；jdk-17 会报 `D:\develop\Java\jdk-17\Packages does not exist`） |
 | Gradle | `tooling/gradle-8.14/bin/gradle.bat`（自带发行版）；**勿用系统 gradle-7.2**（native 库初始化失败且过旧） |
 | Gradle 用户目录 | `GRADLE_USER_HOME=D:\develop\gradle-7.2\.gradle\repository`（缓存已就位，含 ideaIC 2024.1.7 约 1GB） |
@@ -18,6 +18,7 @@
 | 自动化沙箱 | pwsh 沙箱拦截工作区外读写与部分出站网络 → **gradle/npm 命令需完整沙箱权限**（仅自动化环境；用户本机无此限制） |
 | 一键打包 | `scripts/build-plugin.bat`（双击；自动探测 JBR/Gradle 缓存，`--no-daemon`，输出产物路径） |
 | 版本号 | 插件版本 = `build.gradle.kts` 第 13 行 `version`；**勿动** `DshHomeManager.DSH_VERSION`（= dsh 运行时版本 `0.1.0-rc.7`，决定运行时目录名） |
+| 前向编译检查 | `tooling\gradle-8.14\bin\gradle.bat compileKotlin --no-daemon -PplatformVersion=2026.2`（下载 ideaIC 2026.2 约 1.5GB 到 Gradle 缓存；新平台自带 Kotlin 模块 metadata 高于 2.0.21，已加 `-Xskip-metadata-version-check`；JCEF 自 2026.2 起拆分为内置插件 `com.intellij.modules.jcef`，检查时需列入 `plugins`） |
 
 ### 常用命令（自动化环境需完整权限）
 
@@ -126,7 +127,8 @@ src/main/resources/
 
 ### 2024.1 API 勘误（编译期验证）
 
-- 无 `com.intellij.util.json.JsonUtil` → 用 Gson（`com.google.gson.Gson`，平台自带）。
+- 无 `com.intellij.util.json.JsonUtil` → 用 Gson（`com.google.gson.Gson`，平台自带）。**v0.1.1 起改为自研 `JsonCodec`**
+  （Gson 正被 JetBrains 逐步移出平台，2026.2 前向编译验证通过；见 §3/§6 与 DESIGN §3.1）。
 - `LanguageUtil.getLanguageForFile(vf)` 不存在 → `getLanguageForPsi(project, vf)`。
 - `Document` 无 `isModified` → `FileDocumentManager.isDocumentUnsaved(doc)`；Document 无 `selectionModel` → 用 `(FileEditorManager.selectedEditor as? TextEditor)?.editor`。
 - `VfsUtil.visitChildrenRecursively` 不存在 → `VfsUtilCore.visitChildrenRecursively` + `VirtualFileVisitor`（**`visitFile` 返回 `Boolean`**，false=跳过 children；不是 Result）。
@@ -153,11 +155,11 @@ src/main/resources/
 
 | 层 | 类 | 说明 |
 |---|---|---|
-| 单元 | PortParserTest / McpPatchGeneratorTest / SnapshotDiffTest / PathFiltersTest / SentSelectionQueueTest / WorkspaceInitializerTest / DshRuntimeRegistryTest / CredentialImporterTest | 纯 JUnit，无 IDE 依赖 |
+| 单元 | PortParserTest / McpPatchGeneratorTest / SnapshotDiffTest / PathFiltersTest / SentSelectionQueueTest / WorkspaceInitializerTest / DshRuntimeRegistryTest / CredentialImporterTest / **JsonCodecTest（v0.1.1）** | 纯 JUnit，无 IDE 依赖 |
 | 集成冒烟 | DshBootstrapSmokeTest（真实 dsh 启动 + workspace 注册断言）/ DshMcpBridgeSmokeTest（mock bridge + MCP tools/list 6 工具 + failOnStartupError 严格启动） | 需 `DSH_IDEA_RUNTIME`，否则跳过 |
 
 - 冒烟测试注意：临时 DSH_HOME 内 dsh 自愈 junction 指向 runtime → **tearDown 必须先 unlinkJunctions 再让 `@TempDir` 清理**，否则清空 runtime（见 §4）。
-- 测试计数：**36 个**（截至 v0.5.9，Step 6 复跑通过；沙箱下需完整权限，否则 Gradle native 服务初始化失败）。
+- 测试计数：**45 个**（截至 v0.1.1；36 基础 + JsonCodecTest 9；沙箱下需完整权限，否则 Gradle native 服务初始化失败）。
 
 ---
 

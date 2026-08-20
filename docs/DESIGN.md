@@ -75,7 +75,7 @@
 
 ### 3.1 项目骨架与构建
 
-- Gradle（Kotlin DSL），`org.jetbrains.intellij` **1.17.4**（2.x platform 线未在本网络插件门户解析到且 DSL 不兼容，升级列入技术债 C-1，见 build.gradle.kts 注释与 MILESTONE_REVIEW.md），platformVersion `2024.1`，Kotlin 2.0.x，JVM 17（toolchain）。
+- Gradle（Kotlin DSL），`org.jetbrains.intellij` **1.17.4**（2.x platform 线未在本网络插件门户解析到且 DSL 不兼容，升级列入技术债 C-1，见 build.gradle.kts 注释与 MILESTONE_REVIEW.md），platformVersion `2024.1`（编译目标，`-PplatformVersion` 可覆盖做前向编译检查），`until-build` 262.*（支持至 IDEA 2026.2），Kotlin 2.0.x，JVM 17（toolchain）。
 - 包根 `com.deepseek.harness.idea`，子包：
   - `runtime`：DshProcessManager、DshHomeManager、Bootstrap、PortParser、ProcessLog
   - `bridge`：IdeBridgeServer、BridgeApi（请求/响应模型）、BridgeAuth（token）
@@ -171,7 +171,9 @@ dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录�
 ### 3.5 IDE Bridge Server（Kotlin）
 
 - JDK `com.sun.net.httpserver.HttpServer`，绑定 `127.0.0.1` 随机端口；`X-DSH-IDE-Token` 校验（常量时间比较，SHA-256 摘要后 `MessageDigest.isEqual`）。
-- JSON 序列化用平台自带 Gson（`com.google.gson.Gson`，util-8.jar；**2024.1 无 `com.intellij.util.json.JsonUtil`**）。
+- JSON 序列化用自研 `JsonCodec`（`com.deepseek.harness.idea.util`，无第三方/平台依赖）。**背景**：2024.1 无
+  `com.intellij.util.json.JsonUtil`，原用平台自带 Gson（`com.google.gson.Gson`，util-8.jar）；v0.1.1 起改为自研
+  实现（Gson 正被 JetBrains 逐步移出平台，且 `until-build` 放宽到 262.* 后需避免平台库差异，见 PROJECT_NOTES §3/§4）。
 - 线程模型：`Executors.newCachedThreadPool`；VFS/PSI 操作经 `ReadAction.compute` 切后台线程安全读取；文件打开经 `ApplicationManager.getApplication().invokeAndWait` 切 EDT。
 - 端点（均为 JSON，见 §4.1）；`selection`/`open-files`/`project-tree` 基于活动编辑器与 VFS：
   - 活动编辑器取 `FileEditorManager.selectedEditor as? TextEditor` 的 `Editor`（`Document` 无 selectionModel，选中状态在 Editor）；
@@ -407,3 +409,4 @@ PRD §7 验收清单 8 条。
 | 2026-08-20 | v0.5.7 | 插件 Overview / What's New 中英双语（plugin.xml description/change-notes） |
 | 2026-08-20 | v0.5.8 | 一键打包脚本 scripts/build-plugin.bat；新增 docs/PROJECT_NOTES.md 知识库 |
 | 2026-08-20 | v0.5.9 | Step 6 里程碑评审：新增 docs/MILESTONE_REVIEW.md；§3.1 修正 intellij 版本为 1.17.4（2.x 为技术债）；补 v0.5.2–v0.5.8 变更记录；测试 36/36 复跑通过 |
+| 2026-08-20 | v0.1.1 | 兼容修复：`until-build` 251.* → 262.*（IDEA 2026.2 实测安装报错）；`-PplatformVersion` 支持前向编译检查（2026.2 SDK 编译验证）；§3.5 JSON 序列化 Gson → 自研 JsonCodec（移除平台 Gson 依赖）；新增 JsonCodecTest 9 例；测试 36→45 |

@@ -1,6 +1,6 @@
 package com.deepseek.harness.idea.bridge
 
-import com.google.gson.Gson
+import com.deepseek.harness.idea.util.JsonCodec
 import com.intellij.lang.LanguageUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
@@ -37,7 +37,6 @@ class IdeBridgeServer(
     private val token: String,
 ) : Disposable, HttpHandler {
 
-    private val gson = Gson()
     private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
     private val executor = Executors.newCachedThreadPool { r -> Thread(r, "dsh-ide-bridge").apply { isDaemon = true } }
     private val disposed = AtomicBoolean(false)
@@ -237,8 +236,7 @@ class IdeBridgeServer(
     private fun readBody(exchange: HttpExchange): Map<String, Any?> {
         val raw = exchange.requestBody.readBytes().toString(StandardCharsets.UTF_8)
         return try {
-            @Suppress("UNCHECKED_CAST")
-            gson.fromJson(raw, Map::class.java) as? Map<String, Any?> ?: emptyMap()
+            JsonCodec.decodeObject(raw)
         } catch (e: Exception) {
             LOG.warn("bad json body", e)
             emptyMap()
@@ -246,7 +244,7 @@ class IdeBridgeServer(
     }
 
     private fun json(exchange: HttpExchange, status: Int, body: Any) {
-        val bytes = gson.toJson(body).toByteArray(StandardCharsets.UTF_8)
+        val bytes = JsonCodec.encode(body).toByteArray(StandardCharsets.UTF_8)
         exchange.responseHeaders.set("Content-Type", "application/json; charset=utf-8")
         exchange.sendResponseHeaders(status, bytes.size.toLong())
         exchange.responseBody.use { it.write(bytes) }

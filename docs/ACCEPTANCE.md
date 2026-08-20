@@ -4,7 +4,7 @@
 
 | # | 验收项 | 状态 | 验证方式 | 备注 |
 |---|---|---|---|---|
-| 1 | 从磁盘安装构建出的 zip 到独立 IDEA 2024.1+（Windows）实例，无报错 | ⏳ 手工 | `gradle buildPlugin` → `deepseek-harness-idea-0.1.0.zip`（98.1MB，含运行时） | 本环境无法启动独立 IDE 会话；zip 结构已验证（plugin.jar + kotlin-stdlib + annotations） |
+| 1 | 从磁盘安装构建出的 zip 到独立 IDEA 2024.1–2026.2（Windows）实例，无报错 | ⏳ 手工 | `gradle buildPlugin` → `deepseek-harness-idea-0.1.1.zip`（≈98MB，含运行时） | 本环境无法启动独立 IDE 会话；zip 结构已验证（plugin.jar + kotlin-stdlib + annotations）；2026.2 安装兼容已修复（v0.1.1，until-build 262.*） |
 | 2 | 设置页填入 DeepSeek API Key 后工具窗口内可对话；智能体可读项目文件 | ⏳ 手工 | 需真实 API Key + IDE 会话 | 凭据链路已自动化：设置页写 PasswordSafe → `.credentials.yaml`（`DshHomeManager.syncCredentials`，Step 2 实现） |
 | 3 | 指示智能体"新建 `src/Hello.java`"，文件出现在项目树并可打开 | ⏳ 手工 | 真实对话 | 底层已就绪：dsh cwd=项目根（Step 2）+ fs 工具 |
 | 4 | 指示智能体修改某文件，审查面板出现 diff，还原后恢复 | ✅ 自动（逻辑层） | `SnapshotDiffTest`（5/5）、`ReviewManager` 三类还原（MODIFIED 覆盖/NEW 删除/DELETED 重建） | UI 交互（DiffManager 面板）需 IDE 会话手工确认 |
@@ -15,9 +15,9 @@
 
 ## 自动化测试覆盖合计
 
-- 单元：SentSelectionQueue 5、McpPatchGenerator 4、SnapshotDiff 5、DshRuntimeRegistry 3、PortParser 4、CredentialImporter 4、PathFilters 5、WorkspaceInitializer 4 = **34**
+- 单元：SentSelectionQueue 5、McpPatchGenerator 4、SnapshotDiff 5、DshRuntimeRegistry 3、PortParser 4、CredentialImporter 4、PathFilters 5、WorkspaceInitializer 4、**JsonCodec 9（v0.1.1）** = **43**
 - 集成冒烟（真实 dsh 运行时）：DshBootstrapSmokeTest 1、DshMcpBridgeSmokeTest 1 = **2**
-- **合计 36/36 通过**（Step 6 复跑确认，2026-08-20）
+- **合计 45/45 通过**（v0.1.1 复跑确认）
 
 ## 需人工 IDE 会话确认的项
 
@@ -30,4 +30,4 @@
 ## Step 6 结论
 
 以上 5 项已作为**遗留问题 A-1～A-5** 归档至 [MILESTONE_REVIEW.md](./MILESTONE_REVIEW.md)（v0.6 验收闭环 backlog）；
-自动化（逻辑层）验收项 4/6/8 及第 5 项链路在 36/36 测试中持续守护。
+自动化（逻辑层）验收项 4/6/8 及第 5 项链路在 45/45 测试中持续守护。

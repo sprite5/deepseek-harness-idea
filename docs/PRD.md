@@ -5,7 +5,7 @@
 | 文档版本 | v0.1 |
 | 日期 | 2026-02-11 |
 | 状态 | 草稿（随实现迭代更新） |
-| 目标 IDE | IntelliJ IDEA Community / Ultimate，2024.1+ |
+| 目标 IDE | IntelliJ IDEA Community / Ultimate，2024.1 – 2026.2（since 241 / until 262.*，v0.1.1 起） |
 | 目标平台 | Windows 10/11 x64（MVP）；架构预留 macOS / Linux |
 
 ---
@@ -140,14 +140,14 @@ DeepSeek Harness（DSH）是一个以本地 Web UI（`dsh web`，默认 `http://
 | NFR-02 | 安全 | 所有服务仅绑定 127.0.0.1；MCP/Bridge 间使用随机 token；API Key 不落日志、不落插件源代码；不使用 `--host 0.0.0.0`（dsh 本身拒绝） |
 | NFR-03 | 可靠性 | 安装/解压幂等；崩溃可自动重启（退避）；项目关闭/IDE 退出无残留进程；磁盘写失败有明确报错 |
 | NFR-04 | 可维护性 | dsh 版本固定（`@deepseek-ai/dsh@0.1.0-rc.7`），升级=重建运行时；DSH_HOME 版本化目录便于升级；模块边界清晰（runtime/bridge/mcp/review/ui/settings 分离） |
-| NFR-05 | 兼容性 | IntelliJ IDEA 2024.1+（Community/Ultimate）；Windows 10/11 x64；路径含空格/中文可用；JCEF 不可用有降级 |
+| NFR-05 | 兼容性 | IntelliJ IDEA 2024.1 – 2026.2（Community/Ultimate，until 262.*）；Windows 10/11 x64；路径含空格/中文可用；JCEF 不可用有降级 |
 | NFR-06 | 可用性 | 关键失败（缺 Key、Node 缺失、端口异常、崩溃）均有中文+英文明确提示与恢复路径；不静默失败 |
 
 ## 7. 成功标准与验收清单
 
 MVP 成功标准：全新 IDEA 实例中，安装插件 zip → 配置 API Key → 工具窗口内完成一次真实对话，智能体能够读取项目文件、创建新文件、修改文件，且改动可审查/还原，代码上下文可发送。逐条验收清单（Step 5 执行）：
 
-1. 从磁盘安装构建出的 zip 到独立 IDEA 2024.1+（Windows）实例，无报错。
+1. 从磁盘安装构建出的 zip 到独立 IDEA 2024.1 – 2026.2（Windows）实例，无报错。
 2. 设置页填入 DeepSeek API Key 后，工具窗口内可对话；智能体可读取项目文件内容。
 3. 指示智能体"新建 `src/Hello.java`"，文件出现在项目树并可打开。
 4. 指示智能体修改某文件，审查面板出现该文件 diff，还原后内容恢复。
@@ -158,7 +158,7 @@ MVP 成功标准：全新 IDEA 实例中，安装插件 zip → 配置 API Key �
 
 ## 8. 假设与依赖
 
-- Windows 10/11 x64；IntelliJ IDEA Community/Ultimate 2024.1+。
+- Windows 10/11 x64；IntelliJ IDEA Community/Ultimate 2024.1 – 2026.2（until 262.*）。
 - 用户持有 DeepSeek API Key（`deepseek-chat` / `deepseek-reasoner` 可用）。
 - 构建机有网络（构建时下载 Node 与 dsh 依赖）；**运行时离线可用**（运行时已打包）。
 - dsh 版本固定 0.1.0-rc.7（与当前环境一致），其 Web UI 与 `--patch`/mcp-client 行为以该版本为准。

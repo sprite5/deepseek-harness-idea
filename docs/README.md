@@ -37,6 +37,7 @@
 | 2026-08-20 | v0.5.8 | 一键打包脚本 scripts/build-plugin.bat（自动探测 JBR/Gradle 缓存，--no-daemon）；新增 docs/PROJECT_NOTES.md 项目知识库（环境/踩坑/API 勘误/dsh 行为） |
 | 2026-08-20 | v0.5.9 | Step 6 里程碑评审：新增 docs/MILESTONE_REVIEW.md（Step 0–5 总结、FR/US/非目标覆盖矩阵、遗留问题 A–D 分级、PRD §9 风险回顾、v0.6/v0.7/v1.x 规划）；同步修正 DESIGN.md（§3.1 intellij 1.17.4、补 v0.5.2–0.5.8 变更记录）与 ACCEPTANCE.md（测试合计 32→36）；测试 36/36 复跑通过 |
 | 2026-08-20 | v1.0.0 开源 | 项目开源发布至 GitHub（MIT）：仓库 tieJiangW/deepseek-harness-idea（main + v0.1.0 tag）；新增根 README.md（中英）、LICENSE、.gitattributes；首次提交 47 文件；Release v0.1.0 含插件 zip 附件（98MB，含内嵌运行时） |
+| 2026-08-20 | v0.1.1 | 兼容修复：`until-build` 251.* → 262.*（用户 IDEA 2026.2/build 262 安装报错，前向编译验证通过）；Gson → 自研 `JsonCodec`（移除平台 Gson 依赖）；新增 JsonCodecTest 9 例；测试 36→45 |
 
 ## 实施进度
 

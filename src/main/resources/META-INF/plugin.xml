@@ -82,6 +82,19 @@
 
     <change-notes><![CDATA[
         <h3>English / 中文</h3>
+        <h4>v0.1.1</h4>
+        <ul>
+            <li>Compatibility: now supports IntelliJ IDEA up to 2026.2 (build 262.*). Previously the
+            plugin only declared support up to 2025.1 (build 251.*), so newer IDEs refused to load it.</li>
+            <li>兼容性：现在支持至 IntelliJ IDEA 2026.2（build 262.*）。此前仅声明支持到 2025.1
+            （build 251.*），新版 IDE 会拒绝加载。</li>
+        </ul>
+        <ul>
+            <li>Removed dependency on the platform-bundled Gson JSON library (being phased out by
+            JetBrains); JSON serialization is now self-contained and version-independent.</li>
+            <li>移除对平台自带 Gson JSON 库的依赖（JetBrains 正逐步移除该库）；JSON 序列化改为
+            自包含实现，与平台版本无关。</li>
+        </ul>
         <h4>v0.1.0</h4>
         <ul>
             <li>Menu icon for "Send Selection to DSH" now matches the plugin icon.
@@ -101,7 +114,7 @@
 
     <depends>com.intellij.modules.platform</depends>
 
-    <idea-version since-build="241" until-build="251.*"/>
+    <idea-version since-build="241" until-build="262.*"/>
 
     <actions>
         <!-- Step 4：编辑器右键发送选中代码到 DSH（图标与插件工具窗口一致，便于识别归属） -->

@@ -22,6 +22,8 @@
 
 **手工测试迭代（v0.5.1–v0.5.8，用户反馈闭环）**：默认选中主界面、默认工作区预注册、紧凑文件引用（去提示语/光标落位）、四个标题动作区分图标、右键动作图标统一、插件 Overview/What's New 中英双语、一键打包脚本 build-plugin.bat、项目知识库 PROJECT_NOTES.md。
 
+**评审后兼容修复（v0.1.1）**：`until-build` 251.* → 262.*（用户 IDEA 2026.2/build 262 安装报错；`-PplatformVersion=2026.2` 前向编译验证通过）；Gson → 自研 `JsonCodec`（移除平台 Gson 依赖）；新增 JsonCodecTest 9 例（测试 36→45）。详见 docs/README.md 变更记录与 DESIGN §3.1/§3.5。
+
 ## 2. 需求覆盖矩阵
 
 ### 2.1 功能需求（PRD §5）
@@ -109,8 +111,8 @@ US-01～US-10 均有对应实现；其中 US-01/02/04/06/07/10 的**最终体验
 
 ## 4. 质量数据（评审时点实测）
 
-- **自动化测试 36/36 通过**：单元 34（PortParser 4、McpPatchGenerator 4、SnapshotDiff 5、PathFilters 5、SentSelectionQueue 5、DshRuntimeRegistry 3、WorkspaceInitializer 4、CredentialImporter 4）+ 集成冒烟 2（真实 dsh 启动/工作区注册、MCP 桥接 6 工具）。
-- **构建产物**：`build/distributions/deepseek-harness-idea-0.1.0.zip`，102,889,616 B（≈98.1MB），2026-08-20 12:37 构建；含 runtime-bundle.zip（≈106.9MB 压缩，首次解压 ≈62s）。
+- **自动化测试 45/45 通过**（v0.1.1 复跑）：单元 43（PortParser 4、McpPatchGenerator 4、SnapshotDiff 5、PathFilters 5、SentSelectionQueue 5、DshRuntimeRegistry 3、WorkspaceInitializer 4、CredentialImporter 4、JsonCodec 9）+ 集成冒烟 2（真实 dsh 启动/工作区注册、MCP 桥接 6 工具）。评审时点（Step 6）为 36/36，v0.1.1 新增 JsonCodecTest。
+- **构建产物**：`build/distributions/deepseek-harness-idea-0.1.1.zip`（v0.1.0 为 102,889,616 B ≈98.1MB；v0.1.1 含 Gson→JsonCodec 变更）；含 runtime-bundle.zip（≈106.9MB 压缩，首次解压 ≈62s）。
 - **构建链**：JBR 21 必须；Gradle 8.14 `--no-daemon`（防缓存锁）；一键脚本 `scripts/build-plugin.bat`。
 - 运行时目录（`tooling/runtime-dev` 与 `build/runtime`）均完整（node + dsh 齐全，可离线构建）。
 

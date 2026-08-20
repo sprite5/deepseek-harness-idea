@@ -29,7 +29,7 @@ changes with native diff tooling.
 
 ## 环境要求 / Requirements
 
-- IntelliJ IDEA Community / Ultimate **2024.1+**（Windows 10/11 x64；macOS/Linux 规划中）
+- IntelliJ IDEA Community / Ultimate **2024.1 – 2026.2**（build 241 – 262；Windows 10/11 x64；macOS/Linux 规划中）
 - 持有 DeepSeek API Key（`deepseek-chat` / `deepseek-reasoner`）
 - 构建机器需要网络（构建时下载 Node.js 22.23.2 与 `@deepseek-ai/dsh@0.1.0-rc.7`）；**运行时离线可用**（已打包进插件）
 
@@ -88,7 +88,7 @@ Node 子进程（DSH）
 
 ## 测试 / Tests
 
-- 36 个测试：34 单元 + 2 集成冒烟（真实 dsh 启动 / MCP 桥接 6 工具）。
+- 45 个测试：43 单元 + 2 集成冒烟（真实 dsh 启动 / MCP 桥接 6 工具）。
 - 冒烟测试需要 `DSH_IDEA_RUNTIME` 指向预构建运行时目录，否则自动跳过。
 
 ## 许可 / License

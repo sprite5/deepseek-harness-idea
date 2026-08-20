@@ -10,15 +10,30 @@ plugins {
 }
 
 group = "com.deepseek.harness"
-version = "0.1.0"
+version = "0.1.1"
 
 repositories {
     mavenCentral()
 }
 
+val platformVersion: String = providers.gradleProperty("platformVersion").getOrElse("2024.1.7")
+
 dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    // JCEF 在 2026.2（build 262）起从平台核心拆分为内置插件 com.intellij.modules.jcef：
+    // 其模块声明为 public 可见性，运行时无需在 plugin.xml 声明依赖即可解析类；
+    // 前向编译检查（-PplatformVersion=2026.2）时把该内置插件的 lib jars 加入编译 classpath 验证 API 兼容。
+    if (platformVersion.startsWith("2026")) {
+        val gradleUserHome = System.getenv("GRADLE_USER_HOME") ?: (System.getProperty("user.home") + "/.gradle")
+        val sdkCache = file("$gradleUserHome/caches/modules-2/files-2.1/com.jetbrains.intellij.idea/ideaIC/$platformVersion")
+        compileOnly(
+            fileTree(sdkCache) {
+                include("*/ideaIC-$platformVersion/plugins/jcef-plugin/lib/**/*.jar")
+            }
+        )
+    }
 }
 
 java {
@@ -29,6 +44,10 @@ java {
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
+        // 前向编译检查（-PplatformVersion=2026.2）时，新版平台自带的 Kotlin 模块（如 fleet.*）
+        // metadata 版本高于本工程 Kotlin 2.0.21，需跳过 metadata 版本校验（仅检查我们的源码，
+        // 不涉及平台内部 Kotlin 类；见 docs/PROJECT_NOTES.md §1）
+        freeCompilerArgs.add("-Xskip-metadata-version-check")
     }
 }
 
@@ -41,15 +60,19 @@ sourceSets {
 
 intellij {
     // 目标平台：IntelliJ IDEA Community 2024.1+（与 PRD 一致）
-    version.set("2024.1.7")
+    // 支持 -PplatformVersion=2026.2 做前向兼容编译检查（见 docs/PROJECT_NOTES.md）
+    version.set(platformVersion)
     type.set("IC")
-    plugins.set(listOf())
+    // JCEF：2024.1 内核自带（app-client.jar）；2026.2 起为内置插件，见上方 dependencies 条件编译 classpath
+    plugins.set(emptyList())
 }
 
 tasks {
     patchPluginXml {
         sinceBuild.set("241")
-        untilBuild.set("251.*")
+        // 2026.2 (build 262) 起兼容范围放宽；2026-08-20 用户实测 IDEA 2026.2 安装报
+        // "requires build251.* or older"，故 251.* → 262.*（含前向编译验证，见 DESIGN §3.1）
+        untilBuild.set("262.*")
     }
 
     // 跳过 searchable options 构建（需要无头启动 IDE，CI/沙箱中不稳定）
