@@ -1,0 +1,141 @@
+<idea-plugin>
+    <id>com.deepseek.harness.idea</id>
+    <name>DeepSeek Harness</name>
+    <vendor>DeepSeek Harness Dev</vendor>
+
+    <description><![CDATA[
+        <h3>English</h3>
+        <p><b>DeepSeek Harness</b> embeds the full DeepSeek Harness AI agent workbench directly inside
+        IntelliJ IDEA. Chat with the agent in an embedded web UI, let it read and modify your project
+        files, and review its changes with native diff tooling — a Qoder-like AI coding experience.</p>
+
+        <h4>Key features</h4>
+        <ul>
+            <li><b>Embedded Web UI</b> — the full DeepSeek Harness interface (chat, sessions, goals,
+            workflows) runs in an IDE tool window via JCEF.</li>
+            <li><b>Workspace-bound agent</b> — the agent works with your current project directory as
+            its workspace (auto-registered on startup); it can read, create and modify project files.</li>
+            <li><b>IDE context via MCP</b> — the agent can read your current editor selection, open
+            files and project tree, and open/reveal files, through the <code>mcp__ide__*</code> tools.</li>
+            <li><b>Send selection to DSH</b> — right-click any code selection to send a compact file
+            reference (<code>@path#L1-14</code>) to the harness; the full selection stays available to
+            the agent even if injection fails (clipboard fallback).</li>
+            <li><b>Review &amp; restore</b> — a baseline snapshot lets you diff agent changes
+            (modified/new/deleted), restore single or all files, ignore, or rebaseline.</li>
+            <li><b>Self-contained runtime</b> — Node.js and the DeepSeek Harness runtime are bundled
+            with the plugin and extracted on first use; no separate installation or network needed.</li>
+            <li><b>Multi-project &amp; lifecycle</b> — one instance per project (max 3 concurrent),
+            processes are terminated on project close / IDE exit; crash auto-restart with backoff.</li>
+            <li><b>Logs &amp; diagnostics</b> — a DSH Log tab shows the dsh process output; crash
+            notifications and a configurable log level help you debug.</li>
+            <li><b>Bilingual UI</b> — all plugin UI follows your IDE language (English / 简体中文).</li>
+        </ul>
+
+        <h4>Getting started</h4>
+        <ol>
+            <li>Open the <b>DeepSeek Harness</b> tool window (right edge) — the bundled runtime is
+            extracted automatically on first open.</li>
+            <li>Go to <b>Settings → Tools → DeepSeek Harness</b>, enter your <b>DeepSeek API Key</b>
+            (or import it from <code>~/.dsh</code>), and apply.</li>
+            <li>Start a conversation; ask the agent to read your code, or select code and use
+            <i>Send Selection to DSH</i> to hand it context.</li>
+            <li>Use <i>Review changes</i> in the tool window to inspect and restore agent edits.</li>
+        </ol>
+
+        <h3>中文</h3>
+        <p><b>DeepSeek Harness</b> 把 DeepSeek Harness 智能体工作台完整嵌入 IntelliJ IDEA：在 IDE
+        内嵌的 Web 界面中与智能体对话，让它读写你的项目文件，并用原生 diff 工具审查它的改动——
+        类 Qoder 的 AI 编程体验。</p>
+
+        <h4>主要功能</h4>
+        <ul>
+            <li><b>内嵌 Web UI</b> — 完整 DeepSeek Harness 界面（对话、会话、目标、工作流）通过
+            JCEF 在 IDE 工具窗口中运行。</li>
+            <li><b>以项目为工作区</b> — 智能体以当前项目目录为工作区（启动时自动注册）；可读取、
+            新建、修改项目文件。</li>
+            <li><b>MCP 桥接 IDE 上下文</b> — 智能体可通过 <code>mcp__ide__*</code> 工具读取当前
+            选中代码、打开的文件、项目树，并打开/定位文件。</li>
+            <li><b>发送选中代码到 DSH</b> — 右键选中代码即可发送紧凑文件引用
+            （<code>@路径#L1-14</code>）给智能体；即使注入失败，完整选中代码仍可被智能体获取
+            （剪贴板兜底）。</li>
+            <li><b>审查与还原</b> — 基线快照让您可以 diff 智能体的改动（修改/新增/删除），
+            还原单个或全部文件、忽略、或重新基线。</li>
+            <li><b>自包含运行时</b> — Node.js 与 DeepSeek Harness 运行时随插件打包，首次使用自动
+            解压；无需单独安装或联网。</li>
+            <li><b>多项目与生命周期</b> — 每项目一个实例（并发上限 3）；项目关闭 / IDE 退出时
+            自动终止进程；崩溃自动退避重启。</li>
+            <li><b>日志与诊断</b> — DSH Log 标签页显示 dsh 进程输出；崩溃通知与可配置日志级别
+            便于排查。</li>
+            <li><b>中英双语界面</b> — 插件 UI 跟随 IDE 语言（English / 简体中文）。</li>
+        </ul>
+
+        <h4>快速上手</h4>
+        <ol>
+            <li>打开 <b>DeepSeek Harness</b> 工具窗口（右侧）——首次打开自动解压内置运行时。</li>
+            <li>进入 <b>设置 → Tools → DeepSeek Harness</b>，填写 <b>DeepSeek API Key</b>
+            （或从 <code>~/.dsh</code> 一键导入）并应用。</li>
+            <li>开始对话；让智能体阅读你的代码，或选中代码后使用 <i>发送选中代码到 DSH</i>
+            把上下文交给它。</li>
+            <li>在工具窗口使用 <i>审查改动</i> 查看并还原智能体的修改。</li>
+        </ol>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <h3>English / 中文</h3>
+        <h4>v0.1.0</h4>
+        <ul>
+            <li>Menu icon for "Send Selection to DSH" now matches the plugin icon.
+            「发送选中代码到 DSH」右键菜单图标与插件图标一致。</li>
+        </ul>
+        <ul>
+            <li>Distinct icons for the tool window actions: Settings (gear), Open in browser (web),
+            Review changes (diff), Restart (restart).</li>
+            <li>工具窗口动作区分图标：设置（齿轮）/ 浏览器打开（Web）/ 审查改动（Diff）/ 重启（Restart）。</li>
+        </ul>
+		<ul>
+            <li>Plugin initialization completed, achieving basic interaction functions.</li>
+            <li>插件初始化，完成基本交互功能。</li>
+        </ul>
+        
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <idea-version since-build="241" until-build="251.*"/>
+
+    <actions>
+        <!-- Step 4：编辑器右键发送选中代码到 DSH（图标与插件工具窗口一致，便于识别归属） -->
+        <action id="dsh.sendSelection"
+                class="com.deepseek.harness.idea.ui.SendSelectionAction"
+                text="Send Selection to DSH"
+                description="Send the current editor selection to the embedded DeepSeek Harness"
+                icon="/icons/dsh-toolwindow.svg">
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+        </action>
+    </actions>
+
+    <applicationListeners>
+        <!-- Step 5：项目关闭释放实例 + IDE 退出兜底终止 Node -->
+        <listener class="com.deepseek.harness.idea.runtime.DshLifecycleManager"
+                  topic="com.intellij.openapi.project.ProjectManagerListener"/>
+        <listener class="com.deepseek.harness.idea.runtime.DshAppLifecycleListener"
+                  topic="com.intellij.ide.AppLifecycleListener"/>
+    </applicationListeners>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="DeepSeek Harness" anchor="right"
+                    factoryClass="com.deepseek.harness.idea.ui.DshToolWindowFactory"
+                    icon="/icons/dsh-toolwindow.svg"/>
+
+        <applicationService serviceImplementation="com.deepseek.harness.idea.settings.DshSettingsState"/>
+        <applicationService serviceImplementation="com.deepseek.harness.idea.runtime.DshHomeManager"/>
+        <applicationService serviceImplementation="com.deepseek.harness.idea.runtime.DshRuntimeRegistry"/>
+        <applicationService serviceImplementation="com.deepseek.harness.idea.runtime.DshLifecycleManager"/>
+
+        <applicationConfigurable parentId="tools"
+                                 instance="com.deepseek.harness.idea.settings.DshSettingsConfigurable"
+                                 id="dsh.settings"
+                                 bundle="messages.DshBundle"
+                                 key="settings.displayName"/>
+    </extensions>
+</idea-plugin>

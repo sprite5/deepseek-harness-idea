@@ -1,0 +1,33 @@
+# ---- IntelliJ IDEA ----
+.idea/
+*.iml
+out/
+
+# ---- Gradle ----
+.gradle/
+build/
+
+# ---- Kotlin ----
+.kotlin/
+
+# ---- 本机开发工具（Gradle 发行版 + Node/dsh 运行时，体积大，不入库）----
+tooling/
+
+# ---- 本地配置 / 密钥 ----
+local.properties
+.env
+*.credentials.yaml
+credentials.yaml
+
+# ---- 日志 ----
+*.log
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+
+# ---- dsh 运行时数据（防御性；正常位于 IDE 配置目录）----
+sessions/
+storages/
+runtime/
+dsh-home*/
