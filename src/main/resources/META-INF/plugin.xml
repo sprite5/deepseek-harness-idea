@@ -82,6 +82,23 @@
 
     <change-notes><![CDATA[
         <h3>English / 中文</h3>
+        <h4>v0.1.2</h4>
+        <ul>
+            <li>JCEF compatibility on IntelliJ 2026.2: added an (optional) dependency on the bundled
+            "Web Browser (JCEF)" plugin (<code>com.intellij.modules.jcef</code>). Since 2026.2 JCEF is no
+            longer part of the platform core, so plugins using <code>JBCefBrowser</code> must declare this
+            dependency or the classes are not visible at runtime (NoClassDefFoundError).</li>
+            <li>2026.2 JCEF 兼容修复：新增对内置 "Web Browser (JCEF)" 插件
+            （<code>com.intellij.modules.jcef</code>）的（可选）依赖。2026.2 起 JCEF 不再属于平台核心，
+            使用 <code>JBCefBrowser</code> 的插件必须声明该依赖，否则运行时类不可见
+            （NoClassDefFoundError）。</li>
+        </ul>
+        <ul>
+            <li>When JCEF still fails to initialize, the tool window now shows the concrete exception plus
+            check hints (enable the JCEF plugin / run the IDE on a JBR with JCEF / restart).</li>
+            <li>JCEF 初始化失败时，工具窗口现在会显示具体异常与排查建议（启用 JCEF 插件 /
+            以含 JCEF 的 JBR 运行时启动 / 重启）。</li>
+        </ul>
         <h4>v0.1.1</h4>
         <ul>
             <li>Compatibility: now supports IntelliJ IDEA up to 2026.2 (build 262.*). Previously the
@@ -113,6 +130,13 @@
     ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
+
+    <!-- 2026.2 起 JCEF 从平台核心拆分为内置插件 com.intellij.modules.jcef（"Web Browser (JCEF)"），
+         使用 JCEF（JBCefBrowser）的插件须显式声明依赖，否则运行时 NoClassDefFoundError。
+         该别名自 2025.3.1 (build 253) 引入；为兼容 2024.1–2025.3（JCEF 在平台核心、无此插件 id），
+         用 optional 依赖：253+ 建立依赖使 JCEF 类可见，241–252 缺失时忽略（走核心 JCEF）。
+         见 docs/PROJECT_NOTES.md "2026.2 JCEF 拆分"。 -->
+    <depends optional="true">com.intellij.modules.jcef</depends>
 
     <idea-version since-build="241" until-build="262.*"/>
 

@@ -410,3 +410,4 @@ PRD §7 验收清单 8 条。
 | 2026-08-20 | v0.5.8 | 一键打包脚本 scripts/build-plugin.bat；新增 docs/PROJECT_NOTES.md 知识库 |
 | 2026-08-20 | v0.5.9 | Step 6 里程碑评审：新增 docs/MILESTONE_REVIEW.md；§3.1 修正 intellij 版本为 1.17.4（2.x 为技术债）；补 v0.5.2–v0.5.8 变更记录；测试 36/36 复跑通过 |
 | 2026-08-20 | v0.1.1 | 兼容修复：`until-build` 251.* → 262.*（IDEA 2026.2 实测安装报错）；`-PplatformVersion` 支持前向编译检查（2026.2 SDK 编译验证）；§3.5 JSON 序列化 Gson → 自研 JsonCodec（移除平台 Gson 依赖）；新增 JsonCodecTest 9 例；测试 36→45 |
+| 2026-08-21 | v0.1.2 | 2026.2 JCEF 兼容修复：plugin.xml 新增可选依赖 `com.intellij.modules.jcef`（JCEF 拆分内置插件，见 PROJECT_NOTES "2026.2 JCEF 拆分"）；JCEF 失败提示增强（异常 + 排查建议）；测试 45/45 复跑通过 |

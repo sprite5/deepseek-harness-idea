@@ -129,6 +129,21 @@ src/main/resources/
 
 - 无 `com.intellij.util.json.JsonUtil` → 用 Gson（`com.google.gson.Gson`，平台自带）。**v0.1.1 起改为自研 `JsonCodec`**
   （Gson 正被 JetBrains 逐步移出平台，2026.2 前向编译验证通过；见 §3/§6 与 DESIGN §3.1）。
+
+### 2026.2 JCEF 拆分（v0.1.1 实测/编译期验证）
+
+- **JCEF 不再是平台核心的一部分**：2026.2（build 262）起 `com.intellij.ui.jcef.*` 移到**独立内置插件
+  `com.intellij.modules.jcef`（"Web Browser (JCEF)"）**，其模块声明 `visibility="public"`（其他插件无需
+  声明依赖即可访问类，运行时亦然）。该插件默认启用（bundledPlugins 有、disabledPlugins 空；
+  `ide.browser.jcef.enabled` registry 默认 true）。
+- **运行时不可用排查**（用户 2026.2 实测：安装成功但工具窗口显示 "JCEF is unavailable…"）：
+  1. **IDE 运行时必须是带 JCEF 的 JBR**（`JBCefApp.isJcefFromJbr()` 检查 `JCefAppConfig` 是否来自 jrt 模块；
+     用户如用自定义 JDK 或 "nomod" JBR 则 JCEF 不可用，trae 社区同因）；
+  2. **"Web Browser (JCEF)" 插件需启用**（Settings | Plugins）；
+  3. 修改后**重启 IDE**。
+  - v0.1.1 起工具窗口 JCEF 失败提示会附带异常信息与上述排查建议（`error.jcef.hint`），便于用户在真实会话自诊。
+- 前向编译检查：`-PplatformVersion=2026.2` 时把 `plugins/jcef-plugin/lib/**/*.jar` 加入 compile classpath
+  （`build.gradle.kts` 条件依赖），2024.1 默认构建不受影响（JCEF 在 app-client.jar）。
 - `LanguageUtil.getLanguageForFile(vf)` 不存在 → `getLanguageForPsi(project, vf)`。
 - `Document` 无 `isModified` → `FileDocumentManager.isDocumentUnsaved(doc)`；Document 无 `selectionModel` → 用 `(FileEditorManager.selectedEditor as? TextEditor)?.editor`。
 - `VfsUtil.visitChildrenRecursively` 不存在 → `VfsUtilCore.visitChildrenRecursively` + `VirtualFileVisitor`（**`visitFile` 返回 `Boolean`**，false=跳过 children；不是 Result）。

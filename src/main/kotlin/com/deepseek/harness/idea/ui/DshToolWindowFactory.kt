@@ -332,9 +332,21 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
                 cards.show(this, CARD_BROWSER)
             } catch (e: Throwable) {
                 LOG.warn("JCEF failed to load web ui", e)
-                showError(DshBundle.message("error.jcef"))
+                showError(buildJcefError(e))
             }
         }
+    }
+
+    /**
+     * JCEF 初始化失败提示（含根因线索，便于用户在真实 IDE 会话中排查）。
+     * 2026.2 起 JCEF 是独立内置插件 com.intellij.modules.jcef（"Web Browser (JCEF)"），
+     * 且需要 IDE 以带 JCEF 的 JBR 运行时启动；此处把异常信息与检查建议一并显示。
+     */
+    private fun buildJcefError(e: Throwable): String {
+        val hint = DshBundle.message("error.jcef")
+        val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+        return "$hint<br><br><b>${escapeHtml(detail)}</b><br><br>" +
+            DshBundle.message("error.jcef.hint")
     }
 
     override fun onLogLine(line: String) {
