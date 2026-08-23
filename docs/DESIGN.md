@@ -20,14 +20,13 @@
 | IDE Bridge | 插件内的 Kotlin 本地 HTTP 服务，向 MCP server 暴露 IDE 能力 |
 | MCP | Model Context Protocol；dsh 作为 MCP 客户端连接插件提供的 MCP server |
 
-参考源码（本机 npx 缓存中的 `@deepseek-ai/dsh@0.1.0-rc.7`）：
+参考源码（本机 `tooling/runtime-dev` 与 dsh profile 目录中的 `@deepseek-ai/dsh@0.1.1-rc.2`）：
 
 - `dsh-web-app/lib/startup.js`：web 命令行 `--host/--port/--trusted-host`；`--port 0` 由 OS 分配
 - `dsh-web-app/lib/index.js:107`：启动成功打印 `dsh web: http://127.0.0.1:<port>`（loopback）
 - `dsh-client-connection/lib/index.js`：`/api` 浏览器信任围栏，loopback hostname 默认受信任；`--host 0.0.0.0` 被拒绝
 - `dsh-mcp-client/lib/index.js:738-756`：mcp-client Config schema（`transport: streamable-http` 分支）
-- `~/.dsh/.credentials.yaml`：凭据文件，键 `DEEPSEEK_API_KEY`
-- `~/.dsh/profiles/web/`：profile 结构（`cordis.yml` = bundle 层 + `cordis.patch.yml` 用户层 + `--patch` 覆盖层；`package.json` 的 `dsh.profile.bundles` 声明 bundle）
+- 凭据文件（插件以 `DEEPSEEK_API_KEY` 为键管理）；profiles/web/：profile 结构（`cordis.yml` = bundle 层 + `cordis.patch.yml` 用户层 + `--patch` 覆盖层；`package.json` 的 `dsh.profile.bundles` 声明 bundle）
 
 ## 2. 总体架构
 
@@ -44,7 +43,7 @@
 │  └─ DshProcessManager（Node 子进程生命周期、stdout 端口解析、日志、崩溃重启）           │
 └───────────────────────────────────┬───────────────────────────────────────────────────┘
                                     │ ProcessBuilder：node.exe dsh/bin.js
-                                    │   --profile web --host 127.0.0.1 --port 0 --patch ide.yml
+                                    │   --profile web --patch ide.yml --host 127.0.0.1 --port 0 --no-open
                                     │   cwd=<项目根目录>；env: DSH_HOME、DSH_IDE_BRIDGE_URL、DSH_IDE_TOKEN
 ┌───────────────────────────────────▼───────────────────────────────────────────────────┐
 │  Node 子进程（DSH）                                                                     │
@@ -66,10 +65,13 @@
 
 1. **端口发现**：`dsh web` 支持 `--port 0`，由 OS 分配；启动后 stdout 打印 `dsh web: http://127.0.0.1:<port>`（`dsh-web-app/lib/index.js:107`）。插件逐行读取 stdout 正则 `dsh web: http://127\.0\.0\.1:(\d+)` 得 webPort，随后健康检查。
 2. **信任围栏**：`/api` 请求的浏览器信任围栏接受 loopback hostname（`dsh-client-connection` `isLoopbackHostname`），故 JCEF 从 `http://127.0.0.1:<webPort>` 加载可正常调用 API；无需 `--trusted-host`。`--host 0.0.0.0` 被 dsh 主动拒绝，天然防外网暴露。
-3. **凭据**：`DSH_HOME/.credentials.yaml` 键 `DEEPSEEK_API_KEY`（本机 `~/.dsh/.credentials.yaml` 已确认）。设置页写入该文件即可。
+3. **凭据**：插件在 DSH_HOME 下以 `DEEPSEEK_API_KEY` 为键管理密钥（key 真源 = PasswordSafe + 插件自己管理的
+   全局凭据文件）。设置页写入 PasswordSafe + 全局文件；**不向 dsh 进程注入 `DEEPSEEK_API_KEY` 环境变量**
+   （`dsh-credentials-local.resolve()` 为 `inherited env wins`，注入会遮蔽 Web UI 写入并使 `assertUnshadowed`
+   拒绝 Web UI 的 set；见 §3.9 与 PROJECT_NOTES §4）。
 4. **Profile 合成**：`profiles/<name>/cordis.yml` 初始为 `[]`，由 bundle 层（`package.json` 的 `dsh.profile.bundles`）+ `cordis.patch.yml` 用户层 + `--patch` 覆盖层合成。插件以 `--patch <ide.yml>` 注入 mcp-client，不污染用户层。
 5. **MCP 客户端**：`@deepseek-ai/dsh-mcp-client` 支持 `transport: streamable-http`；每实例一个 serverName；模型侧工具名为 `mcp__<serverName>__<rawName>`（serverName 须匹配 `^[A-Za-z0-9_-]{1,32}$`）。其依赖 `@modelcontextprotocol/sdk` 存在于 profile 的 hoisted `node_modules`，可被插件附带的 MCP server 脚本 import（脚本置于 DSH_HOME 下按 node 向上查找规则解析）。
-6. **运行时**：固定 `@deepseek-ai/dsh@0.1.0-rc.7` + Node.js 22.x win-x64（与当前环境一致），随插件打包。
+6. **运行时**：固定 `@deepseek-ai/dsh@0.1.1-rc.2` + Node.js 22.x win-x64（与当前环境一致），随插件打包。
 
 ## 3. 模块设计
 
@@ -113,7 +115,7 @@
 **构建期**（`scripts/build-runtime.ps1`，Gradle task `buildRuntime` 调用；已实现并实测通过）：
 
 1. 下载 Node.js 22.x win-x64（固定版本，SHA-256 校验）→ `<OutputDir>/node/`。
-2. 以 npm 安装 `@deepseek-ai/dsh@0.1.0-rc.7` 及其依赖到 `<OutputDir>/dsh/`（`--ignore-scripts`；
+2. 以 npm 安装 `@deepseek-ai/dsh@0.1.1-rc.2` 及其依赖到 `<OutputDir>/dsh/`（`--ignore-scripts`；
    win-x64 原生依赖均以 optionalDependencies 预编译产物提供，无需 postinstall）。
 3. 冒烟验证：读取 `dsh` 版本；`-Bundle` 时打包 `runtime-bundle.zip`（**zip 根直接为 `node/` + `dsh/`**，
    排除源 zip 与 npm 缓存；Step 5 已实测 106.9MB、解压 62s）。
@@ -131,12 +133,12 @@
 - DSH_HOME：`PathManager.getConfigDir()/dsh-idea/dsh-home/`（与运行时分离，不随版本变化）。
   插件幂等生成 `profiles/web/`（package.json + cordis.yml）与 `ide.yml`；dsh 首次启动时
   自愈创建 `profiles/node_modules` junction 指向运行时 dsh 树（实测验证）。
-- 生成运行期文件：`dsh-home/.credentials.yaml`（从设置页）、`ide.yml`（patch，含 mcp-client 配置与 bridge 地址/token）。
+- 生成运行期文件：全局凭据文件（从设置页，PasswordSafe 镜像）、`ide.yml`（patch，含 mcp-client 配置与 bridge 地址/token）。
 - 初始化顺序：校验运行时（必要时解压）→ 生成 DSH_HOME → 写凭据 → 写 patch → 启动进程 → 健康检查。
 
 ### 3.3 DshProcessManager
 
-- `ProcessBuilder`：`[node.exe, <dsh>/lib/bin.js, --profile, web, --host, 127.0.0.1, --port, 0, --patch, <ide.yml>]`；`directory = 项目根目录`；env：`DSH_HOME=<dsh-home>`、`DSH_IDE_BRIDGE_URL=http://127.0.0.1:<bridgePort>`、`DSH_IDE_TOKEN=<random>`；`redirectErrorStream=true` 或分别捕获。
+- `ProcessBuilder`：`[node.exe, <dsh>/lib/bin.js, --profile, web, --patch, <ide.yml>, --host, 127.0.0.1, --port, 0, --no-open]`；`directory = 项目根目录`；env：`DSH_HOME=<dsh-home>`、`DSH_IDE_BRIDGE_URL=http://127.0.0.1:<bridgePort>`、`DSH_IDE_TOKEN=<random>`；**不注入 `DEEPSEEK_API_KEY`**（见 §2.3/§3.9）；`redirectErrorStream=true` 或分别捕获。
 - **参数列表直传，不走 shell**（兼容路径含空格/中文）。
 - stdout 逐行读取：匹配 `dsh web: http://127.0.0.1:(\d+)` → 记录 webPort → HTTP GET `/`（或 `/api`）健康检查（超时 10s，重试 ≤10 次间隔 500ms）→ 回调通知工具窗口加载。
 - 崩溃/退出监听：非预期退出（无 `stop` 标记）→ 通知 + 指数退避自动重启（500ms/2s/5s，≤3 次）→ 手动"重启"按钮；日志写入插件日志 + 工具窗口日志页。
@@ -153,7 +155,7 @@
 ### 3.4.1 默认工作区预注册（FR-04.2 实测落地）
 
 dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录时，web UI 顶部显示
-"选择一个工作区开始"，不会自动把进程 cwd 设为工作区（实测 dsh 0.1.0-rc.7，`workspaceIds: []`）。
+"选择一个工作区开始"，不会自动把进程 cwd 设为工作区（实测 dsh 0.1.1-rc.2，`workspaceIds: []`）。
 
 插件在 dsh 健康检查通过后调用内部 RPC `POST /api/workspace.create`：
 
@@ -165,8 +167,23 @@ dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录�
 - **幂等**：同路径重复调用返回既有 workspace（`created:false`），不重复创建；
 - 实现：`WorkspaceInitializer.ensureWorkspace(webUrl, projectPath)`，在
   `DshProcessManager.waitHealthy` 置 RUNNING 后调用；失败仅日志降级，不阻塞 UI；
-- 验证：`WorkspaceInitializerTest`（4 例）+ `DshBootstrapSmokeTest` 增强（真实 dsh 启动后
-  断言 `workspace.json` 出现项目路径）。
+- 验证：`WorkspaceInitializerTest`（12 例）+ `WorkspaceInitializerSmokeTest`（真实 dsh，
+  切换项目场景）+ `DshBootstrapSmokeTest` 增强（真实 dsh 启动后断言 `workspace.json`
+  出现项目路径）。
+
+**切换项目修复（v0.1.3-dev 实测）**：两处修正——
+
+1. **工具窗口 content 残留（根因）**：同窗口切换项目时 IDEA 复用工具窗口，旧项目 content
+   （面板 + DSH 日志页）未清理，新项目 createToolWindowContent 叠加 → 出现**两个主面板**，
+   用户选中旧面板即显示旧项目工作区。修复：`createToolWindowContent` 开头先
+   `contentManager.removeContent(old, true)` 清空全部旧 content（触发旧面板 dispose → 杀其
+   dsh 进程）；`DshToolWindowPanel.dispose()` 加 AtomicBoolean 幂等位。
+2. **`workspace.create` 幂等不改变顺序**：`workspace.json` 的 `workspaceIds` 显示顺序中，
+   新项目若已是既有 workspace 则保持原位置；为让当前项目稳定显示在列表最前，
+   `ensureWorkspace` 在 create 成功后追加 `workspace.list` + `workspace.insertBefore`
+   （把当前项目挪到最前；dsh 0.1.1-rc.2 已暴露该 RPC）。
+
+真实 dsh 冒烟验证：A→B 切换后 B 在 `workspaceIds[0]`，切回 A 后 A 回到最前。
 
 ### 3.5 IDE Bridge Server（Kotlin）
 
@@ -198,7 +215,7 @@ dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录�
 
 **patch 注入（`ide.yml`）**：
 
-- 由插件生成（`McpPatchGenerator`），内容为 cordis loader patch 条目数组。**实测语法**（dsh 0.1.0-rc.7）：`--patch` 覆盖层只能修改已有条目或 `insert` 新增；新增 mcp-client 实例须用 `insert` 列表，且 `name` 字段必须显式声明插件包名：
+- 由插件生成（`McpPatchGenerator`），内容为 cordis loader patch 条目数组。**实测语法**（dsh 0.1.1-rc.2）：`--patch` 覆盖层只能修改已有条目或 `insert` 新增；新增 mcp-client 实例须用 `insert` 列表，且 `name` 字段必须显式声明插件包名：
 
 ```yaml
 # ide.yml（McpPatchGenerator 生成，mcpPort 动态填入）
@@ -231,7 +248,7 @@ dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录�
   文本末尾（引用行下一行），可直接输入问题。完整选中代码仍写入 Bridge sent-selection 队列
   （智能体可经 `ide_get_sent_selection` 取回，或经 fs 工具读文件对应行）。实测确认：dsh 输入
   触发菜单仅注册了 `/` 源，`@` 前缀（`roster.length===0`）不会弹菜单，可安全作为引用前缀。
-- **技术边界（实测 dsh 0.1.0-rc.7）**：dsh 输入框**不支持**输入态"文件引用 chip（文件名+行号+X 删除）"——
+- **技术边界（实测 dsh 0.1.1-rc.2）**：dsh 输入框**不支持**输入态"文件引用 chip（文件名+行号+X 删除）"——
   `@`/`/` 菜单仅注册了 workspace/command/skill/subagent 等源，无文件源；`fileMentions` 渲染仅匹配
   "本轮工具产出文件"（`producedFileMentions`），对用户选中发送的代码不生效。故采用紧凑引用文本方案。
 - 智能体侧兜底：`ide_get_sent_selection` 随时可取最近推送的代码（即使注入失败也不丢上下文）。
@@ -249,18 +266,53 @@ dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录�
 ### 3.9 设置页
 
 - `DshSettingsState`（`PersistentStateComponent`，application 级，跨项目共享）：
-  - `apiKey`（`PasswordSafe`，`PasswordSafe.getInstance().setPassword`，state 只存引用名）
   - `model`（`deepseek-chat` 默认 / `deepseek-reasoner`）
   - `baseUrl`（默认 `https://api.deepseek.com`，可空）
-  - `dshHomeOverride`（高级，默认 null → 用 `PathManager.getConfigDir()/dsh-idea/runtime/<version>/dsh-home`）
+  - `dshHomeOverride`（高级，默认 null → 用 `PathManager.getConfigDir()/dsh-idea/dsh-home`）
   - `logLevel`
-- 应用行为：写 `.credentials.yaml`（`DEEPSEEK_API_KEY`）+ 可选 `.env`（`DSH_BASE_URL`/模型，键名 Step 3 spike 确认）；提示"重启会话生效"；"重启 dsh"按钮。
-- `CredentialImporter`：读 `~/.dsh/.credentials.yaml` 的 `DEEPSEEK_API_KEY`（yaml 解析仅取该键），不存在/无键 → 提示。
+- **API Key（`DshCredentials`，PasswordSafe 应用级）**：
+  - 读写 `PasswordSafe`（应用级凭据条目）。
+  - **脱敏回显**（用户要求"前 6 位 + 中间脱敏 + 后 6 位"）：`DshCredentials.maskApiKey(key)` 前 6 位 + `******` + 后
+    6 位（≤12 位整段脱敏）；设置页用 `JBTextField` 回显脱敏串（不能用 `JBPasswordField`，其把文本渲染成掩码点，
+    看不到脱敏串）；`isModified`/`apply` 以"字段内容 ≠ 当前脱敏串"判定用户是否真的改了 key，避免把脱敏串写回密码库。
+  - **回显兜底**：`readApiKey() ?: readApiKeyFromCredentialFile(插件全局凭据文件)`——PasswordSafe 读不到
+    （如 IDE 密码库未解锁）时回退到插件自管的全局凭据文件（方案A真源）。
+- 应用行为：写 PasswordSafe + 同步插件全局凭据文件（`syncCredentialsAll` → `syncCredentials`）；
+  **不再向 dsh 进程注入 `DEEPSEEK_API_KEY` 环境变量**（见 §2.3/§3.9 说明）；提示"重启会话生效"；"重启 dsh"按钮。
+- **Web UI 改 key 全局生效（`DshCredentialsSync`，方案B）**：dsh Web UI（Models page）改 key 写当前项目
+  DSH_HOME 下凭据文件（version:1 + refs）；`DshCredentialsSync` 用 `WatchService` 监听该文件，
+  与全局不一致时回写 PasswordSafe + 插件全局凭据文件——改 key 的那个 dsh 进程立即生效，其它项目
+  **下次启动/重启**时 `syncCredentials()`/`ensureHome()` 从全局复制 + 透传，全局一致。
+- `CredentialImporter`：读用户本机 source 凭据文件的 `DEEPSEEK_API_KEY`（解析仅取该键），不存在/无键 → 提示。
 
 ### 3.10 国际化
 
 - `messages/DshBundle.properties`（英文默认）+ `DshBundle_zh_CN.properties`（中文）；`DshBundle.message("key", args...)` 封装 `ResourceBundle`（UTF-8，`ResourceBundle.Control` 处理）。
 - 覆盖：工具窗口标题/动作/状态、设置页、通知、审查面板、错误提示。Web UI 文案由 dsh 自带（不本地化）。
+
+### 3.11 运行日志一键解释（FR-11）
+
+- 运行控制台右键动作"DSH 一键解释"（`SendLogExplanationAction`，注册于 `ConsoleView.PopupMenu`）：
+  - 组 id 两版本源码核实：2024.1.7 `ConsoleViewImpl.java:93` 与 2026.2 `ConsoleViewImpl.kt:1668`
+    均为 `CONSOLE_VIEW_POPUP_MENU = "ConsoleView.PopupMenu"`（弹窗挂在控制台 editor 上，
+    `CommonDataKeys.EDITOR`/`PROJECT` 可用，选中文本在 `selectionModel`）；
+  - `update()`（BGT）仅在有选中文本时显示；`actionPerformed` 用 `ReadAction` 读选中文本，
+    `ExplainLogComposer.buildMessage(prefix, log)` 组装消息（本地化指令 + 空行 + 日志，
+    >64KB 截断并注明，纯函数可单测），经 `DshToolWindowPanel.find(project)` 取面板后调用 `sendQuestion`；
+  - 面板为 null（工具窗口从未打开）→ 剪贴板 + 通知。
+- `DshToolWindowPanel.sendQuestion`（自动提交，**不等待用户确认**）：
+  1. 在途守卫（`AtomicBoolean` 防双击）+ token 化回调（`AtomicLong` 防旧回调串台）；
+  2. 激活工具窗口并 `setSelectedContent(content 0)` 切到对话页（避免停在日志 tab）；
+  3. JCEF 注入脚本：原生 setter 填 composer → `input` 事件 → 派发 `keydown Enter`
+     （dsh composer 实测：非 shift 的 Enter → `keyboard.submit`，智能体忙时默认入队仍送达）→
+     轮询 ≤3s 判 textarea 清空 = `submitted`；未清空则回退点击
+     `button[aria-label="Send message"/"发送消息"]`（**不用 class 通配**，避免误点运行中的"停止"按钮）；
+  4. 结果经 **JBCefJSQuery** 回传 `submitted / blocked / no-composer`：`submitted` → 通知已发送；
+     `blocked` → 消息留在输入框 + 提示手动回车；其他 → 剪贴板兜底 + 失败通知；
+     `setupJsQuery` 必须在 `loadURL` **之前**创建（CEF message router 在页面加载时注入
+     `window.<funcName>`；创建失败降级为无验证乐观提示）。
+- 技术边界（实测 dsh 0.1.1-rc.2）：composer 文本区即页面 `<textarea>`（`document.querySelector('textarea')`）；
+  发送按钮 aria-label 实际为 "Send message" / "发送消息"（`t("input.send")`）。
 
 ## 4. 接口契约
 
@@ -293,36 +345,67 @@ dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录�
 ### 4.3 进程启动与环境
 
 ```
-node.exe <dshHome>/profiles/node_modules/@deepseek-ai/dsh/lib/bin.js \
-  --profile web --patch <dshHome>/ide.yml --host 127.0.0.1 --port 0
+node.exe <dshBin>/lib/bin.js \
+  --profile web --patch <dshHome>/ide.yml --host 127.0.0.1 --port 0 --no-open
 cwd      = <项目根目录>
 env      = DSH_HOME=<dshHome>
            DSH_IDE_BRIDGE_URL=http://127.0.0.1:<bridgePort>
            DSH_IDE_TOKEN=<randomToken>
+           # 注意：不注入 DEEPSEEK_API_KEY（dsh-credentials-local inherited env wins 会遮蔽 Web UI 写入）
 stdout   = 逐行读取；含 "dsh web: http://127.0.0.1:<webPort>"
 ```
 
 > 注意：`--patch` 是启动器选项，必须位于 web 应用选项 `--host`/`--port` 之前；
-> 放在后面会被 web 应用当作未知选项拒绝（实测 dsh 0.1.0-rc.7）。
+> 放在后面会被 web 应用当作未知选项拒绝（实测 dsh 0.1.1-rc.2）。
+> `--no-open`：dsh web 默认会把 Web UI 打开到系统默认浏览器；内嵌于 IDE 工具窗，显式禁用（用户要求，v0.1.3-dev）。
 
 ### 4.4 运行时与 DSH_HOME 目录布局（插件独立）
 
 ```
 <PathManager.getConfigDir()>/dsh-idea/
-├── runtime/<version>/            # 运行时（随版本升级；开发态 DSH_IDEA_RUNTIME 覆盖）
+├── runtime/<version>/            # 运行时（随版本升级；开发态 DSH_IDEA_RUNTIME 覆盖；全局共享，不按项目）
 │   ├── node/                     # Node.js 运行时（win-x64）
 │   └── dsh/                      # npm 安装的 @deepseek-ai/dsh 树（含全部依赖）
-├── dsh-home/                     # DSH_HOME（会话数据持久化，不随运行时版本变化）
-│   ├── .credentials.yaml         # DEEPSEEK_API_KEY（设置页写入）
-│   ├── .env                      # 可选：Base URL / 模型
-│   ├── ide.yml                   # 运行期生成的 patch（mcp-client，McpPatchGenerator）
-│   ├── mcp-ide-server.mjs        # MCP server 脚本（插件资源部署）
-│   ├── node_modules/             # 顶层 junction → runtime/dsh/node_modules（MCP 脚本 ESM 解析 SDK）
-│   ├── profiles/web/             # 物化的 web profile（package.json + cordis.yml）
-│   ├── profiles/node_modules/    # dsh 首次启动自愈创建的 junction → runtime/dsh/node_modules
-│   └── sessions/ storages/       # 会话数据（dsh 自动创建）
-└── mcp-ide-server.mjs            # 运行期从插件资源部署到 dsh-home/（与上同，见 3.6）
+├── dsh-home/                     # DSH_HOME 根（v0.1.3-dev：全局配置 + 每项目隔离数据）
+│   ├── 凭据文件                   #   全局凭据真源（PasswordSafe 镜像；方案A）
+│   ├── settings.yaml             #   全局设置（内测声明 acknowledge；同步到各子目录）
+│   └── <md5(项目根目录)前16位>/   # 每个项目一个独立 DSH_HOME——工作区注册表/会话数据按项目隔离，
+│       ├── 凭据文件               #   切换项目后 dsh 工作区从当前项目"白纸"开始（彻底解决工作区残留）
+│       ├── settings.yaml         #   启动时从全局复制（内测声明等；dsh 读子目录副本）
+│       ├── ide.yml               #   运行期生成的 patch（mcp-client，McpPatchGenerator）
+│       ├── mcp-ide-server.mjs    #   MCP server 脚本（插件资源部署）
+│       ├── node_modules/         #   顶层 junction → runtime/dsh/node_modules（MCP 脚本 ESM 解析 SDK）
+│       ├── profiles/web/         #   物化的 web profile（package.json + cordis.yml）
+│       ├── profiles/node_modules/#   dsh 首次启动自愈创建的 junction → runtime/dsh/node_modules
+│       └── sessions/ storages/   #   会话数据 + 工作区/投影缓存（dsh 自动创建；每个项目独立）
 ```
+
+> **全局配置根（`DshHomeManager.globalConfigHome()`，= `dsh-home/`）**：插件自管的全局凭据文件与
+> `settings.yaml` 的**唯一真源**，所有项目共享；`ensureHome` 启动时用 `copyGlobalConfigTo` 把它们
+> **复制到每项目子目录**（dsh 读子目录副本；dsh 内改动下次启动被全局覆盖——方案A的 tradeoff）。API Key 经
+> `DshCredentialsSync`（WatchService）在 dsh Web UI 改 key 时回写全局 PasswordSafe + 插件全局凭据文件
+> （见 §3.9），使所有子项目下次启动/重启时一致（方案B）。
+
+> **DSH_HOME 按项目隔离（v0.1.3-dev，用户实测驱动）**：`DshHomeManager.homeDir(projectPath)` 用
+> `MD5(projectPath)` 前 16 位派生目录。dsh 的工作区注册表（`workspace.json`）与会话数据因此按项目
+> 隔离：切换项目后，新 dsh 进程的工作区只含当前项目，从机制上杜绝"显示其他项目工作区"
+> （实测：此前共享 DSH_HOME 时，仅"已打开过的旧项目"复现——dsh 记住了其历史会话状态；全新项目无
+> 此问题）。API Key：**不再向 dsh 进程注入 `DEEPSEEK_API_KEY` 环境变量**（dsh-credentials-local
+> 的 `inherited env wins` 会遮蔽 Web UI 写入，且 `assertUnshadowed` 拒绝 Web UI 的 set）。key 真源 =
+> PasswordSafe + 插件全局凭据文件；`syncCredentials(projectPath)` 在项目启动时把它们
+> 写入各项目 DSH_HOME 凭据文件（从全局复制）。dsh Web UI 改 key 写当前项目文件，由
+> `DshCredentialsSync`（WatchService）监听并在与全局不同时回写全局——使所有子项目**下次启动/重启**时一致
+> （方案B）。设置页 apply 用 `syncCredentialsAll()` 同步全局。
+>
+> **升级迁移（v0.1.3-dev，用户要求）**：旧版（v0.1.2）把 session 存在全局 `dsh-home/sessions/`；
+> 升级到按项目隔离后，旧 session 目录仍在全局根但不再被读取。`DshHomeManager.ensureHome` 通过
+> `LegacySessionMigrator` 把当前项目的旧 session 目录**原样复制**（保留 `.jsonl.zstd` 压缩格式）到
+> 隔离目录 `sessions/<projectKey(cwd)>/`，并**迁移投影缓存** `storages/session_projcache.json`
+> （筛选当前项目 identity.cwd 匹配的会话条目，合并写入隔离目录）——dsh 的 `session.list` 用**零 I/O
+> 投影缓存**读会话标题，缺缓存时 UI 回退显示 `basename(cwd)`（即项目目录名），迁移缓存后标题立即可见
+> （用户实测：历史会话标题全部显示成项目名）。workspace 注册表由 dsh 启动时自动 bootstrap 从 session
+> header 重建，无需手工迁移。详见 `LegacySessionMigrator` / `LegacySessionMigratorTest` /
+> `LegacySessionMigratorSmokeTest`。
 
 ### 4.5 patch 模板（`ide.yml`）
 
@@ -330,7 +413,7 @@ stdout   = 逐行读取；含 "dsh web: http://127.0.0.1:<webPort>"
 
 ## 5. 数据流
 
-1. **启动链路**：工具窗口打开 → `DshProcessManager.start()` → 解压/校验运行时 → 写凭据/patch → spawn node（cwd=项目）→ 逐行读 stdout 解析 webPort → 健康检查 → `toolWindow.loadUrl(webPort)` → JCEF 加载 Web UI；用户对话 → dsh 智能体（fs 工具以 cwd=项目目录读写文件）。
+1. **启动链路**：工具窗口打开 → `DshProcessManager.start()` → 解压/校验运行时 → `syncCredentials()`（PasswordSafe→插件全局凭据文件）+ `ensureHome`（全局配置复制到子目录 + 旧 session/投影缓存迁移）→ spawn node（cwd=项目，`--no-open`）→ 逐行读 stdout 解析 webPort → 健康检查 → `toolWindow.loadUrl(webPort)` → JCEF 加载 Web UI；同时 `DshCredentialsSync` 启动监听子项目凭据文件（dsh Web UI 改 key 时回写全局）。用户对话 → dsh 智能体（fs 工具以 cwd=项目目录读写文件）。
 2. **MCP 链路**：智能体调用 `mcp__ide__ide_get_selection` → dsh mcp-client → streamable-http → mcp-ide-server.mjs → fetch+bridge token → IDE Bridge（EDT 读 VFS/PSI）→ JSON 原路返回 → 智能体。
 3. **发送代码链路**：编辑器动作 → 读选中 → POST /sent-selection（Bridge 队列）→ 聚焦工具窗口 + JS 注入（失败→剪贴板）→ 智能体经 `ide_get_sent_selection` 或提示文本获取。
 4. **审查链路**：打开工具窗口 → 基线快照 → 用户点"审查改动" → VFS 刷新 → 对比 → DiffManager diff → 还原（VFS 写回快照）/忽略/重新基线。
@@ -359,25 +442,33 @@ stdout   = 逐行读取；含 "dsh web: http://127.0.0.1:<webPort>"
 
 ### 7.1 单元测试（JUnit，Gradle `test`）
 
-- `PortParserTest`：stdout 行解析（含多行/前缀/异常格式）
-- `SnapshotDiffTest`：modified/new/deleted 判定、忽略规则、容量上限
-- `McpPatchGeneratorTest`：patch yaml 生成与占位符替换
-- `CredentialImporterTest`：`~/.dsh/.credentials.yaml` 解析（临时文件）
-- `PathFiltersTest`：忽略规则
-- `SentSelectionQueueTest`：环形容量、64KB 截断、id 序（Step 4）
-- `DshRuntimeRegistryTest`：并发上限 3、释放名额、幂等（Step 5）
+- `PortParserTest`(4)：stdout 行解析（含多行/前缀/异常格式）
+- `SnapshotDiffTest`(5)：modified/new/deleted 判定、忽略规则、容量上限
+- `McpPatchGeneratorTest`(6)：patch yaml 生成与占位符替换
+- `CredentialImporterTest`(4)：用户 source 凭据文件解析 `DEEPSEEK_API_KEY`（临时文件）
+- `PathFiltersTest`(5)：忽略规则
+- `SentSelectionQueueTest`(5)：环形容量、64KB 截断、id 序（Step 4）
+- `DshRuntimeRegistryTest`(3)：并发上限 3、释放名额、幂等（Step 5）
+- `JsonCodecTest`(9)：自研 JsonCodec 编解码（v0.1.1）
+- `ExplainLogComposerTest`(4)：运行日志一键解释的消息组装（v0.1.3-dev）
+- `WorkspaceInitializerTest`(12)：workspace.create/insertBefore 链路（v0.1.3-dev）
+- `LegacySessionMigratorTest`(14)：`projectKey` 编码 + 旧 session/投影缓存迁移 + 幂等（v0.1.3-dev）
+- `DshCredentialsMaskTest`(10)：API key 脱敏 + 凭据文件解析（v0.1.3-dev）
+- `DshCredentialsSyncTest`(6)：Web UI 改 key 回写全局的比对逻辑（v0.1.3-dev）
 
 ### 7.2 集成冒烟（Gradle `test` + `DSH_IDEA_RUNTIME`）
 
-- `DshBootstrapSmokeTest`：临时 DSH_HOME + 假凭据，spawn `dsh web --port 0`，断言 stdout 端口 + HTTP 200；
+- `DshBootstrapSmokeTest`(1)：临时 DSH_HOME + 假凭据，spawn `dsh web --port 0`，断言 stdout 端口 + HTTP 200；
   设置了 `DSH_IDEA_RUNTIME` 时自动执行，否则跳过（CI 无运行时环境）。
-- `DshMcpBridgeSmokeTest`（Step 3）：JDK mock bridge + mcp-ide-server.mjs（部署到临时 DSH_HOME，顶层 junction 解析 SDK）+
+- `DshMcpBridgeSmokeTest`(1)（Step 3）：JDK mock bridge + mcp-ide-server.mjs（部署到临时 DSH_HOME，顶层 junction 解析 SDK）+
   `tools/list` 断言 6 个 `ide_*` 工具 + `tools/call` 桥接返回 + dsh web 带 `failOnStartupError: true` patch 启动（连接失败即拒绝启动，能起来即证明 MCP 链路通）。
-- 本地执行：`$env:DSH_IDEA_RUNTIME="<runtime 目录>"; gradle test`（实测通过）。
+- `WorkspaceInitializerSmokeTest`(1)（v0.1.3-dev）：真实 dsh 切换项目场景，断言当前项目工作区置顶。
+- `LegacySessionMigratorSmokeTest`(1)（v0.1.3-dev）：zstd session 迁移到隔离目录后真实 dsh 工作区自动挂接该 session。
+- 本地执行：`$env:DSH_IDEA_RUNTIME="<runtime 目录>"; gradle test`（实测通过，累计 90 个）。
 
 ### 7.3 手工验收（`runIde`，Step 5 执行）
 
-PRD §7 验收清单 8 条。
+PRD §7 验收清单 9 条（含 v0.1.3-dev 新增"DSH 一键解释"）。
 
 ## 8. 实现步骤分解与验收
 
@@ -411,3 +502,15 @@ PRD §7 验收清单 8 条。
 | 2026-08-20 | v0.5.9 | Step 6 里程碑评审：新增 docs/MILESTONE_REVIEW.md；§3.1 修正 intellij 版本为 1.17.4（2.x 为技术债）；补 v0.5.2–v0.5.8 变更记录；测试 36/36 复跑通过 |
 | 2026-08-20 | v0.1.1 | 兼容修复：`until-build` 251.* → 262.*（IDEA 2026.2 实测安装报错）；`-PplatformVersion` 支持前向编译检查（2026.2 SDK 编译验证）；§3.5 JSON 序列化 Gson → 自研 JsonCodec（移除平台 Gson 依赖）；新增 JsonCodecTest 9 例；测试 36→45 |
 | 2026-08-21 | v0.1.2 | 2026.2 JCEF 兼容修复：plugin.xml 新增可选依赖 `com.intellij.modules.jcef`（JCEF 拆分内置插件，见 PROJECT_NOTES "2026.2 JCEF 拆分"）；JCEF 失败提示增强（异常 + 排查建议）；测试 45/45 复跑通过 |
+| 2026-08-22 | v0.1.3-dev | 运行控制台"DSH 一键解释"（FR-11）：`SendLogExplanationAction`（注册于 `ConsoleView.PopupMenu`，组 id 2024.1/2026.2 源码核实）、`ExplainLogComposer`（指令 + 日志，>64KB 截断，纯函数）、`DshToolWindowPanel.sendQuestion`（JCEF 填 composer + 派发回车自动提交；JBCefJSQuery 结果回传 submitted/blocked；在途守卫 + token 防串台；降级剪贴板/手动回车）；新增 ExplainLogComposerTest 4 例 |
+| 2026-08-22 | v0.1.3-dev | 切换项目工作区修复：①工具窗口 content 残留（同窗口切换项目复用工具窗口，旧项目 content 未清理 → 两个主面板/旧工作区）——`createToolWindowContent` 先清空旧 content + `DshToolWindowPanel.dispose()` 幂等；②`WorkspaceInitializer.ensureWorkspace` 在 create 后追加 workspace.list + workspace.insertBefore 把当前项目挪到最前（create 幂等不改变顺序）；新增 WorkspaceInitializerTest 链路 8 例 + WorkspaceInitializerSmokeTest（真实 dsh 切换场景，见 §3.4.1） |
+| 2026-08-22 | v0.1.3-dev | 切换项目工作区**根治**（用户确认）：每一项目独立 DSH_HOME（`DshHomeManager.homeDir(projectPath)`=MD5(projectPath) 前 16 位目录，见 §4.4）——dsh 工作区注册表/会话按项目隔离，切到任何项目工作区都从当前项目白纸开始；`syncCredentials(projectPath)` 项目启动写凭据、设置页 `syncCredentialsAll()` 同步所有打开项目 |
+| 2026-08-23 | v0.1.3-dev | dsh 运行时升级 0.1.0-rc.7 → **0.1.1-rc.2**（用户要求）：改 `DshHomeManager.DSH_VERSION` + `build-runtime.ps1` 默认 DshVersion；重建 runtime-dev 与 build/runtime bundle；`build-runtime.ps1` 中文 PowerShell 脚本须 **UTF-8 BOM**（edit 写成无 BOM 后 Windows PowerShell 5.1 按 GBK 解析中文注释报 `ParserError 未终止标记 ')'`，用 `UTF8Encoding($true)` 写回）；真实 dsh 冒烟（启动/端口/工作区 RPC/MCP 6 工具）对 0.1.1-rc.2 全部通过，行为兼容 |
+| 2026-08-23 | v0.1.3-dev | dsh 0.1.1-rc.2 回归修复（用户截图）：① **API Key 不生效**——0.1.1-rc.2 的 deepseek LLM provider 用 `credentialRef("DEEPSEEK_API_KEY")`，解析优先继承**环境变量**（`inherited env wins`）；插件在 `DshProcessManager` extraEnv 透传 `DEEPSEEK_API_KEY`（从 PasswordSafe），旧平铺凭据文件格式会被 dsh 自动迁移；② **每次新项目弹"内测声明"**——acknowledge 存每项目独立 `settings.yaml` 的 `ui-onboarding.welcomeNoticeVersion`；`ensureHome` 预写该字段 + JCEF 注入自动点 Continue 兜底 |
+| 2026-08-23 | v0.1.3-dev | dsh "Add an API key" onboarding 捕获（用户要求）：JCEF 注入检测弹窗，用户输入 Key 点 "Save and continue" 时经 JBCefJSQuery 回传 `__apikey__<key>` → 写插件 PasswordSafe（`DshCredentials.writeApiKey`），设置页 JBPasswordField 脱敏显示 + 下次启动透传。**注入口径修正**：onUrlReady 时页面未加载、脚本不执行，且旧 `resetSessionPersistence` 的 `location.reload()` 会销毁注入脚本（用户实测不同步、内测声明需手动点）；改为注册 **CefLoadHandler**（`org.cef.handler.CefLoadHandlerAdapter.onLoadEnd`，主 frame 加载完成后注入）并**移除 resetSessionPersistence**（独立 DSH_HOME 下 localStorage 按端口隔离、本就冗余） |
+| 2026-08-23 | v0.1.3-dev | **方案 C：dsh 配置真·同一文件全局共享**（POC 验证后实现）：`DshHomeManager.globalConfigHome()` 为全局配置根（凭据/设置文件唯一真源），每项目子目录 DSH_HOME 只存数据（storages/sessions）；`McpPatchGenerator` 生成 `ide.yml` 时用 cordis patch 的 **`$settings`/`$credentials`**（修改已有单元，POC 确证 `- insert` 会 duplicate、`$id` 才对）把 `settings-file.path`/`credentials-local.path` 指向全局——**配置共享 + 数据按项目隔离 + 无多窗口冲突**；`syncCredentials()` 写全局、`ensureHome` 预写全局 settings.yaml（内测声明全局一次）；新增 McpPatchGeneratorTest 2 例（含 $settings 省略/呈现） |
+| 2026-08-23 | v0.1.3-dev | **升级迁移：旧全局 session → 每项目隔离目录**（用户要求，解决"升级后旧 session 找不到"）：新增 `LegacySessionMigrator`——复刻 dsh `session-persistence-jsonl` 的 `projectKey(cwd)` 编码定位旧全局 `sessions/<projectKey(cwd)>/`，按项目把各 session 目录**原样复制**到隔离目录（保留压缩格式 `.jsonl.zstd`，逐目录合并、已存在跳过，幂等）；`ensureHome` 调 `migrateLegacySessions`。**关键机制**：workspace 注册表（`workspace.json`）无需手工迁移——dsh 启动时若 `initialized=false`（新隔离目录首个实例）会触发 workspace **bootstrap**，从已迁移 session 的 header（`cwd`）自动重建 workspace 并挂接 session 归属（真实 dsh 冒烟验证）。新增 LegacySessionMigratorTest 8 例 + LegacySessionMigratorSmokeTest（真实 dsh：zstd session 迁移后 workspace.json 自动挂接该 sessionId） |
+| 2026-08-23 | v0.1.3-dev | **升级迁移补齐：投影缓存迁移（`session_projcache.json`）**（用户实测修复"历史会话标题全显示成项目名"）：dsh 的 `session.list` 用**零 I/O 投影缓存**（`cachedSnapshot`）读每行会话标题；缓存缺某会话记录时 `session.title=undefined`，UI 回退显示 `basename(cwd)`（项目目录名）。旧全局 `storages/session_projcache.json` 保存各会话 `title` 投影。`LegacySessionMigrator.migrateProjectionCache` 从全局缓存**筛选当前项目**（identity.cwd 规范化匹配，兼容 `/` 与 `\`）会话条目，合并写入隔离目录 `storages/session_projcache.json`（保留目标已有条目，不覆盖）；`ensureHome` 一并调用。真实迁移后 `session.list` 立即返回正确标题（"你是谁？/解释Spring AI MCP配置文件/SSE 405错误分析/..."）。LegacySessionMigratorTest 增至 14 例（含 projcache 4 例） |
+| 2026-08-23 | v0.1.3-dev | **设置页 API Key 脱敏回显**（用户要求"显示前 6 位 + 中间脱敏 + 后 6 位"）：`DshCredentials.maskApiKey(key)` —— 前 6 位 + `******` + 后 6 位（≤12 位整段脱敏）；`DshSettingsConfigurable` 回显脱敏串（改用 `JBTextField`，否则 `JBPasswordField` 把文本渲染成掩码点，用户看不到脱敏串），`isModified`/`apply` 用"字段内容 ≠ 当前脱敏串"判定用户是否真的改了 key，避免把脱敏串当真实 key 写回密码库。新增 DshCredentialsMaskTest 6 例 |
+| 2026-08-23 | v0.1.3-dev | **设置页回显兜底：凭据文件读取**（用户实测"改后仍为空"）：PasswordSafe 读不到 key 时设置页回显为空。`DshCredentials.readApiKeyFromCredentialFile`（行级解析）＋ `readApiKeyWithFallback`（先 PasswordSafe，无则回退插件全局凭据文件，方案A真源）；设置页 `readStoredApiKey()` 用它。DshCredentialsMaskTest 增至 10 例 |
+| 2026-08-23 | v0.1.3-dev | **dsh Web UI 改 API key 也要全局生效**（用户要求+选B方案）：① 去掉 `DshProcessManager` 启动时注入的 `DEEPSEEK_API_KEY` 环境变量——dsh-credentials-local 的 `resolve()` 是 `inherited env wins`，注入 env 会使 dsh 永远读旧值，且 Web UI 改 key 被 `assertUnshadowed` 直接拒绝（源码 `dsh-credentials-local lib/index.js:636`）；② 新增 `DshCredentialsSync`（`WatchService` 监听各项目 DSH_HOME 凭据文件，dsh Web UI/Models page 以 `version:1 + refs.DEEPSEEK_API_KEY` 写入该文件 → 捕获 → 回写 PasswordSafe + 插件全局凭据文件）。**方案B 语义**：改 key 的那个 dsh 进程（去 env 后读文件层，该进程立即生效），其它项目**下次启动/重启**时 `syncCredentials()`/`ensureHome()` 从全局复制+透传 → 全局一致。监听器随项目 Disposable 释放（`DshCredentialsSync.release(projectName)`）。`onFileChanged` 仅当子项目 key 与全局不同才回写（无自激循环）。新增 DshCredentialsSyncTest 6 例 |

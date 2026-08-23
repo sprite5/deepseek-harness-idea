@@ -6,11 +6,11 @@
 
 | 文档 | 说明 | 状态 |
 |---|---|---|
-| [PRD.md](./PRD.md) | 规划需求文档：目标、用户故事、功能/非功能需求、验收标准、风险 | 草稿 |
-| [DESIGN.md](./DESIGN.md) | 详设文档：架构、模块设计、接口契约、数据流、测试策略 | 草稿 |
-| [ACCEPTANCE.md](./ACCEPTANCE.md) | PRD §7 验收清单走查（Step 5 执行，自动化 vs 手工项） | 走查中 |
-| [MILESTONE_REVIEW.md](./MILESTONE_REVIEW.md) | 里程碑评审（Step 6）：Step 0–5 总结、需求覆盖矩阵、遗留问题、风险回顾、后续规划 | ✅ 完成 |
-| [PROJECT_NOTES.md](./PROJECT_NOTES.md) | 项目知识库：本机构建环境、dsh 行为实测、踩坑记录、2024.1 API 勘误、后续任务参考 | 维护中 |
+| [PRD.md](./PRD.md) | 规划需求文档：目标、用户故事、功能/非功能需求、验收标准、风险 | 草稿（随实现迭代更新） |
+| [DESIGN.md](./DESIGN.md) | 详设文档：架构、模块设计、接口契约、数据流、测试策略 | 草稿（随实现迭代更新） |
+| [ACCEPTANCE.md](./ACCEPTANCE.md) | PRD §7 验收清单走查（Step 5 执行，自动化 vs 手工项） | 维护中（90/90 自动化；手工项待真实 IDE 会话） |
+| [MILESTONE_REVIEW.md](./MILESTONE_REVIEW.md) | 里程碑评审（Step 6）：Step 0–5 总结、需求覆盖矩阵、遗留问题、风险回顾、后续规划 | ✅ 完成（2026-08-20 评审时点快照，最新状态见上方文档） |
+| [PROJECT_NOTES.md](./PROJECT_NOTES.md) | 项目知识库：本机构建环境、dsh 行为实测、踩坑记录、2024.1 API 勘误、后续任务参考 | 维护中（v0.1.3-dev） |
 
 ## 文档约定
 
@@ -39,6 +39,19 @@
 | 2026-08-20 | v1.0.0 开源 | 项目开源发布至 GitHub（MIT）：仓库 tieJiangW/deepseek-harness-idea（main + v0.1.0 tag）；新增根 README.md（中英）、LICENSE、.gitattributes；首次提交 47 文件；Release v0.1.0 含插件 zip 附件（98MB，含内嵌运行时） |
 | 2026-08-20 | v0.1.1 | 兼容修复：`until-build` 251.* → 262.*（用户 IDEA 2026.2/build 262 安装报错，前向编译验证通过）；Gson → 自研 `JsonCodec`（移除平台 Gson 依赖）；新增 JsonCodecTest 9 例；测试 36→45 |
 | 2026-08-21 | v0.1.2 | 2026.2 JCEF 兼容修复：plugin.xml 新增（可选）依赖 `com.intellij.modules.jcef`（2026.2 起 JCEF 拆分内置插件，使用 JBCefBrowser 须声明依赖否则运行时 NoClassDefFoundError；别名自 2025.3.1 引入，optional 保证 241–252 兼容）；JCEF 失败提示附带异常 + 排查建议；PROJECT_NOTES 新增"2026.2 JCEF 拆分" |
+| 2026-08-22 | v0.1.3-dev | 运行控制台"DSH 一键解释"（FR-11）：`SendLogExplanationAction` 注册于 `ConsoleView.PopupMenu`（Run 控制台右键组，组 id 2024.1/2026.2 源码核实）；点击后不等待确认，JCEF 自动填 composer + 派发回车提交"解释指令 + 选中日志"；JBCefJSQuery 回传结果（submitted/blocked），失败降级剪贴板；新增 `ExplainLogComposer` 纯函数 + 4 例单测 |
+| 2026-08-22 | v0.1.3-dev | 切换项目工作区修复：`WorkspaceInitializer.ensureWorkspace` 在 create 后追加 workspace.list + workspace.insertBefore 把当前项目挪到显示顺序最前（create 幂等不改变顺序、UI 默认落点=列表第一个，用户实测同窗口切换项目后新会话仍绑旧项目根目录）；新增 WorkspaceInitializerTest 链路 8 例 + WorkspaceInitializerSmokeTest（真实 dsh 切换场景） |
+| 2026-08-22 | v0.1.3-dev | 切换项目工作区根治（用户确认方案）：**每个项目独立 DSH_HOME**（`DshHomeManager.homeDir(projectPath)` = `MD5(projectPath)` 前 16 位目录），dsh 工作区注册表/会话数据按项目隔离——切到任何项目工作区都从当前项目白纸开始，从机制上杜绝"显示其他项目工作区"；`syncCredentials(projectPath)` 项目启动写凭据、设置页 `syncCredentialsAll()` 同步所有打开项目 |
+| 2026-08-23 | v0.1.3-dev | dsh 运行时升级 **0.1.0-rc.7 → 0.1.1-rc.2**（用户要求）：改 `DshHomeManager.DSH_VERSION` + `build-runtime.ps1` 默认 DshVersion，重建 runtime-dev 与 build/runtime bundle；真实 dsh 冒烟全过（启动/端口/工作区 RPC/MCP 6 工具），行为兼容 |
+| 2026-08-23 | v0.1.3-dev | dsh 0.1.1-rc.2 回归修复（用户截图）：① API Key 不生效 → `DshProcessManager` 透传 `DEEPSEEK_API_KEY` 环境变量（dsh 优先读继承环境）；② 每次新项目弹"内测声明" → `ensureHome` 预写 `settings.yaml` 的 `ui-onboarding.welcomeNoticeVersion` + JCEF 自动点 Continue 兜底 |
+| 2026-08-23 | v0.1.3-dev | dsh "Add an API key" onboarding 捕获（用户要求）：JCEF 检测弹窗，用户输入 Key 点 Save 时经 JBCefJSQuery 回传 → 写插件 PasswordSafe，设置页脱敏显示 + 下次透传；注入改为注册 CefLoadHandler（onLoadEnd 主 frame 加载完成后注入，可靠；onUrlReady 时页面未加载 + 移除冗余的 resetSessionPersistence/reload） |
+| 2026-08-23 | v0.1.3-dev | **方案 C：dsh 配置真·同一文件全局共享**（POC 验证后实现）：`DshHomeManager.globalConfigHome()` 全局配置根（凭据/设置文件唯一真源），每项目子目录 DSH_HOME 只存数据（storages/sessions）；`McpPatchGenerator` 用 cordis patch `$settings`/`$credentials`（修改已有单元；`- insert` 会 duplicate、`$id` 才对，POC 确证）把 `settings-file.path`/`credentials-local.path` 指向全局——配置共享 + 数据按项目隔离 + 无多窗口冲突；`syncCredentials()` 写全局、`ensureHome` 预写全局 settings.yaml |
+| 2026-08-23 | v0.1.3-dev | **回退方案 A**（用户实机判定 dsh 未读全局 path 后定）：`McpPatchGenerator` 恢复只生成 `mcp.ide` insert（无 `$settings`）；`DshHomeManager.ensureHome` 把全局唯一配置复制到每项目子目录（`copyGlobalConfigTo`）；`start()` 先 `syncCredentials()` 再 `ensureHome`——配置全局管理、子目录为同步副本（dsh 读子目录；dsh 内改动下次启动被全局覆盖）；API key 以环境变量透传为主 |
+| 2026-08-23 | v0.1.3-dev | **升级迁移：旧全局 session → 每项目隔离目录**（用户要求，解决"升级后旧 session 找不到"）：新增 `LegacySessionMigrator`——复刻 dsh `projectKey(cwd)` 编码定位旧全局 `sessions/<projectKey(cwd)>/`，把各 session 目录**原样复制**（保留 `.jsonl.zstd` 压缩格式，逐目录合并/已存在跳过，幂等）到隔离目录；`ensureHome` 调 `migrateLegacySessions`。workspace 注册表由 dsh 启动时 bootstrap 从 session header 自动重建（无需手工迁移）。新增 `LegacySessionMigratorTest` + `LegacySessionMigratorSmokeTest`（真实 dsh 验证） |
+| 2026-08-23 | v0.1.3-dev | **投影缓存迁移（`session_projcache.json`）**（用户实测修复"历史会话标题全显示成项目名"）：dsh 的 `session.list` 用零 I/O 投影缓存读每行会话标题，缓存缺记录时 `session.title=undefined` → UI 回退显示 `basename(cwd)`（项目目录名）。`LegacySessionMigrator.migrateProjectionCache` 从全局缓存筛选当前项目（identity.cwd 规范化匹配）的会话条目合并写入隔离目录；`ensureHome` 一并调用。真实迁移后 `session.list` 立即返回正确标题（你是谁？/解释Spring AI MCP配置文件/SSE 405错误分析/...）。LegacySessionMigratorTest 增至 14 例 |
+| 2026-08-23 | v0.1.3-dev | **设置页 API Key 脱敏回显**（用户要求"前 6 位 + 中间脱敏 + 后 6 位"）：`DshCredentials.maskApiKey(key)` 前 6 位 + `******` + 后 6 位（≤12 位整段脱敏）；`DshSettingsConfigurable` 回显脱敏串（改用 `JBTextField`，否则 `JBPasswordField` 渲染成掩码点看不到），`isModified`/`apply` 以"字段内容 ≠ 脱敏串"判定是否真改了 key，避免把脱敏串写回密码库。新增 DshCredentialsMaskTest 6 例 |
+| 2026-08-23 | v0.1.3-dev | **设置页回显兜底：凭据文件读取**（用户实测"改后仍为空"）：PasswordSafe 读不到 key 时回显为空。`DshCredentials.readApiKeyFromCredentialFile`（行级解析）+ `readApiKeyWithFallback`（先 PasswordSafe，无则回退插件全局凭据文件）；设置页 `readStoredApiKey()` 用它。DshCredentialsMaskTest 增至 10 例 |
+| 2026-08-23 | v0.1.3-dev | **dsh Web UI 改 API key 全局生效**（用户要求+选B）：去掉 `DshProcessManager` 注入的 `DEEPSEEK_API_KEY` 环境变量（dsh-credentials-local `inherited env wins` 遮蔽 Web UI 写入，且 `assertUnshadowed` 拒改）；新增 `DshCredentialsSync`（WatchService 监听各项目凭据文件，dsh Web UI 写 `version:1 + refs.DEEPSEEK_API_KEY` → 捕获 → 回写 PasswordSafe + 插件全局凭据文件）。方案B：当前 dsh 进程立即生效，其它项目下次启动/重启一致。新增 DshCredentialsSyncTest 6 例 |
 
 ## 实施进度
 
@@ -51,3 +64,5 @@
 | Step 4 | IDE 集成（发送选中代码 / 审查面板 diff+还原） | ✅ 完成 |
 | Step 5 | 加固与发布（生命周期 / 崩溃 UX / 日志页 / 打包 / 验收） | ✅ 完成 |
 | Step 6 | 里程碑评审（总结 / 遗留问题 / 后续规划） | ✅ 完成 |
+| v0.1.2 | 2026.2 JCEF 兼容修复 | ✅ 完成 |
+| v0.1.3-dev | 切换项目工作区根治（每项目独立 DSH_HOME）+ dsh 0.1.1-rc.2 升级回归 + 运行日志一键解释 + 旧 session/投影缓存升级迁移 + API Key 脱敏回显与 Web UI 全局生效 | ✅ 完成（90/90 测试） |

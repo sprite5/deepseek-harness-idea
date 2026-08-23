@@ -1,5 +1,10 @@
 # 里程碑评审（Step 6）— DeepSeek Harness IDEA 插件
 
+> **⚠️ 历史快照**：本文是 Step 6 里程碑评审（2026-08-20）时的记录，反映 Step 0–5 收官状态。
+> 其后的 **v0.1.1 / v0.1.2 / v0.1.3-dev**（每项目隔离 DSH_HOME、dsh 0.1.1-rc.2、运行日志一键解释、
+> 旧 session 迁移、API key 全局化等）已远超本快照。**最新实现与状态请以 [README.md](./README.md)、
+> [DESIGN.md](./DESIGN.md)、[ACCEPTANCE.md](./ACCEPTANCE.md) 为准**；本文件仅作历史评审背景留存。
+
 | 项目 | 内容 |
 |---|---|
 | 评审时间 | 2026-08-20 |
@@ -40,7 +45,7 @@
 | FR-02.4 | 端口发现 + 健康检查 | ✅ | stdout 正则 + HTTP 探活 |
 | FR-02.5 | 崩溃通知 + 退避重启 ≤3 | ✅ | 500ms/2s/5s |
 | FR-02.6 | 并发上限 3 | ✅ | DshRuntimeRegistry + 提示 |
-| FR-03.1–3.5 | 设置页（Key/模型/BaseURL/导入/高级） | ✅ | PasswordSafe + `.credentials.yaml` + "重启会话生效"提示 |
+| FR-03.1–3.5 | 设置页（Key/模型/BaseURL/导入/高级） | ✅ | PasswordSafe + 插件全局凭据文件 + "重启会话生效"提示 |
 | FR-04.1 | cwd = 项目根目录 | ✅ | 智能体 fs 以项目为工作区 |
 | FR-04.2 | 附加项目工作区 | ✅ | workspace.create RPC 预注册（幂等；UI 打开即选中） |
 | FR-05.1–5.3 | 发送选中代码 | ✅ | 64KB 截断 → Bridge 队列 → 注入/剪贴板降级；`ide_get_sent_selection` 兜底 |
@@ -109,10 +114,14 @@ US-01～US-10 均有对应实现；其中 US-01/02/04/06/07/10 的**最终体验
 | D-3 | ACCEPTANCE.md 测试合计 32 漏 WorkspaceInitializerTest（4 例） | ✅ 修正为 36 |
 | D-4 | ACCEPTANCE.md 状态"走查中"未随 Step 6 收尾 | ✅ 标注评审结论 |
 
-## 4. 质量数据（评审时点实测）
+## 4. 质量数据（评审时点 vs 当前）
 
-- **自动化测试 45/45 通过**（v0.1.1 复跑）：单元 43（PortParser 4、McpPatchGenerator 4、SnapshotDiff 5、PathFilters 5、SentSelectionQueue 5、DshRuntimeRegistry 3、WorkspaceInitializer 4、CredentialImporter 4、JsonCodec 9）+ 集成冒烟 2（真实 dsh 启动/工作区注册、MCP 桥接 6 工具）。评审时点（Step 6）为 36/36，v0.1.1 新增 JsonCodecTest。
-- **构建产物**：`build/distributions/deepseek-harness-idea-0.1.1.zip`（v0.1.0 为 102,889,616 B ≈98.1MB；v0.1.1 含 Gson→JsonCodec 变更）；含 runtime-bundle.zip（≈106.9MB 压缩，首次解压 ≈62s）。
+> 评审时点（2026-08-20，Step 6）与 v0.1.1（Gson→JsonCodec）的数据如下；**截至 v0.1.3-dev，自动化测试已达 90/90**（见下方"当前"）。
+
+- **评审时点（2026-08-20，Step 6）**：自动化测试 **36/36**（Step 0–5）；构建产物 `deepseek-harness-idea-0.1.0.zip`（102,889,616 B ≈98.1MB）；含 runtime-bundle.zip（≈106.9MB 压缩，首次解压 ≈62s）。
+- **v0.1.1**：Gson→JsonCodec 变更，新增 JsonCodecTest 9 例，测试 36→**45**；`until-build` 251.*→262.*。
+- **v0.1.2**：2026.2 JCEF 兼容修复（plugin.xml 可选依赖 `com.intellij.modules.jcef`）；测试 45/45 复跑通过。
+- **v0.1.3-dev（当前）**：每项目独立 DSH_HOME/工作区根治、dsh 0.1.1-rc.2 升级回归、运行日志一键解释（FR-11）、旧 session/投影缓存升级迁移、API Key 脱敏回显 + Web UI 全局生效（方案B）；测试 **90/90**（86 单元 + 4 集成冒烟）；构建产物 `deepseek-harness-idea-0.1.2.zip`。
 - **构建链**：JBR 21 必须；Gradle 8.14 `--no-daemon`（防缓存锁）；一键脚本 `scripts/build-plugin.bat`。
 - 运行时目录（`tooling/runtime-dev` 与 `build/runtime`）均完整（node + dsh 齐全，可离线构建）。
 

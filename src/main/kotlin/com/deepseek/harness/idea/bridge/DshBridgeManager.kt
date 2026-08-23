@@ -1,7 +1,6 @@
 package com.deepseek.harness.idea.bridge
 
 import com.deepseek.harness.idea.mcp.McpPatchGenerator
-import com.deepseek.harness.idea.runtime.DshHomeManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
@@ -65,7 +64,8 @@ class DshBridgeManager(
 
     private fun startMcpServer() {
         try {
-            val script = DshHomeManager.getInstance().mcpServerScript()
+            // mcp-ide-server.mjs 部署在按项目隔离的 DSH_HOME 顶层（v0.1.3-dev）
+            val script = homeDir.resolve("mcp-ide-server.mjs")
             if (!Files.isRegularFile(script)) {
                 LOG.error("mcp-ide-server.mjs not deployed: $script")
                 return

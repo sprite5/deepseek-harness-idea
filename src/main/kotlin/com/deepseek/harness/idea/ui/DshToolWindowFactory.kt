@@ -18,6 +18,8 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.jcef.JBCefBrowser
+import com.intellij.ui.jcef.JBCefBrowserBase
+import com.intellij.ui.jcef.JBCefJSQuery
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.CardLayout
@@ -26,10 +28,16 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.io.File
 import java.net.URI
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.function.Consumer
 import javax.swing.BoxLayout
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.SwingConstants
+import org.cef.browser.CefBrowser
+import org.cef.browser.CefFrame
+import org.cef.handler.CefLoadHandlerAdapter
 
 /**
  * 工具窗口：启动内嵌 dsh → 状态流转 → JCEF 加载 Web UI。
@@ -37,6 +45,13 @@ import javax.swing.SwingConstants
  */
 class DshToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
+        // 防御：同窗口切换项目时 IDEA 可能复用同一个工具窗口实例，旧项目 content
+        // （上一项目的面板 + DSH 日志页）会残留，出现重复面板 + 旧工作区/旧进程。
+        // 先把全部旧 content 移除并 dispose（触发旧面板 dispose → 杀其 dsh 进程），再建当前项目的。
+        toolWindow.contentManager.contents.forEach { old ->
+            toolWindow.contentManager.removeContent(old, true)
+        }
+
         val panel = DshToolWindowPanel(project)
         // 主界面必须是第一个 content 且默认选中（否则日志 tab 抢焦点）
         val content = ContentFactory.getInstance().createContent(panel, DshBundle.message("toolwindow.title"), false)
@@ -65,6 +80,18 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         private const val CARD_LOADING = "loading"
         private const val CARD_BROWSER = "browser"
         private const val CARD_ERROR = "error"
+        const val TOOL_WINDOW_ID = "DeepSeek Harness"
+
+        /** JBCefJSQuery 回传里标记"来自 dsh 弹窗的 API Key"的前缀（与一键发送结果区分）。 */
+        const val APIKEY_PREFIX = "__apikey__"
+
+        /** 通过工具窗口主 content（index 0）查找当前项目的面板（SendSelectionAction/SendLogExplanationAction 共用）。 */
+        fun find(project: Project): DshToolWindowPanel? {
+            val tw = com.intellij.openapi.wm.ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
+                ?: return null
+            if (tw.contentManager.contentCount == 0) return null
+            return tw.contentManager.getContent(0)?.component as? DshToolWindowPanel
+        }
     }
 
     private val cards = layout as CardLayout
@@ -79,6 +106,23 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
 
     /** 日志面板（Step 5 FR-08.1），null = 未打开。 */
     private var logPanel: DshLogPanel? = null
+
+    /** JCEF JS 回传通道（一键发送的结果验证；须早于 loadURL 创建，null = 创建失败走乐观降级）。 */
+    @Volatile
+    private var jsQuery: JBCefJSQuery? = null
+
+    /** 当前发送的等待回调（token 防旧回调串台，见 [sendQuestion]）。 */
+    @Volatile
+    private var pendingSend: PendingSend? = null
+
+    /** 自动发送在途守卫（防双击/连点重复提交）。 */
+    private val sending = AtomicBoolean(false)
+
+    /** dispose 幂等位（项目切换 content 先移除 + 项目关闭 Disposer 双路径）。 */
+    private val disposed = AtomicBoolean(false)
+
+    /** 每次发送的单调 token，用于丢弃过期回调。 */
+    private val sendToken = AtomicLong(0)
 
     init {
         add(buildPlaceholderCard(), CARD_PLACEHOLDER)
@@ -116,23 +160,34 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         showCard(CARD_LOADING)
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                homeManager.ensureHome()
+                // 项目根目录：作为工作空间（dsh 注册）与 DSH_HOME 隔离标识（v0.1.3-dev 切换项目修复）
+                val projectRoot = project.basePath ?: ""
+                // 方案 A：先更新全局 .credentials.yaml，再 ensureHome 把全局配置同步到子目录
+                // （key 真源 = PasswordSafe + 全局 .credentials.yaml；不再向 dsh 进程注入
+                //   DEEPSEEK_API_KEY 环境变量 —— dsh-credentials-local 的 inherited env wins 会遮蔽
+                //   Web UI 写入，并使 Web UI 改 key 被 assertUnshadowed 拒绝）。
                 homeManager.syncCredentials()
-                val home = homeManager.homeDir().toFile()
-                val homePath = homeManager.homeDir()
+                homeManager.ensureHome(projectRoot)
+                val homePath = homeManager.homeDir(projectRoot)
+                val home = homePath.toFile()
+
+                // dsh Web UI 改 key 监听：dsh 写当前项目 DSH_HOME/.credentials.yaml → 回写
+                // PasswordSafe + 全局，使其它项目下次启动/重启全局一致（方案 B）。
+                com.deepseek.harness.idea.runtime.DshCredentialsSync.register(
+                    project.name, homePath.resolve(".credentials.yaml")
+                )
 
                 // Step 3：MCP 桥接编排（bridge + mcp-ide-server + ide.yml patch）
                 val bridge = DshBridgeManager(
                     project = project,
                     nodeExe = homeManager.nodeExe().toFile(),
-                    workDir = File(project.basePath ?: System.getProperty("user.home")),
+                    workDir = File(projectRoot.ifEmpty { System.getProperty("user.home") }),
                     homeDir = homePath,
                 )
                 bridgeManager = bridge
                 Disposer.register(this, bridge)
 
                 val patchFile = waitForMcpPatch(bridge, homePath)
-                val projectRoot = project.basePath ?: ""
                 val manager = DshProcessManager(
                     nodeExe = homeManager.nodeExe().toFile(),
                     dshBin = homeManager.dshBin().toFile(),
@@ -140,11 +195,15 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
                     homeDir = home,
                     patchFile = patchFile.toFile(),
                     projectPath = projectRoot,
-                    extraEnv = mapOf(
-                        "DSH_IDE_BRIDGE_URL" to bridge.bridgeUrl(),
-                        "DSH_IDE_TOKEN" to bridge.bridgeToken(),
-                        "DSH_LOG_LEVEL" to com.deepseek.harness.idea.settings.DshSettingsState.getInstance().logLevel,
-                    ),
+                    extraEnv = buildMap {
+                        put("DSH_IDE_BRIDGE_URL", bridge.bridgeUrl())
+                        put("DSH_IDE_TOKEN", bridge.bridgeToken())
+                        put("DSH_LOG_LEVEL", com.deepseek.harness.idea.settings.DshSettingsState.getInstance().logLevel)
+                        // 注意：不再注入 DEEPSEEK_API_KEY 环境变量。dsh-credentials-local 的
+                        // resolve() 是 inherited env wins；一旦注入，dsh 永远读 env 旧值，且 Web UI
+                        // 改 key 会被 assertUnshadowed 拒绝。key 真源为 PasswordSafe + 全局
+                        // .credentials.yaml，由 DshCredentialsSync 在 Web UI 改动时回写全局。
+                    },
                 )
                 processManager = manager
                 manager.addListener(this)
@@ -172,15 +231,22 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
     }
 
     override fun dispose() {
+        // 幂等：项目切换时旧 content 会经 removeContent 先 dispose，随后项目关闭的
+        // Disposer 链可能再次调用；用原子位防重复销毁（重复杀进程/释放名额）。
+        if (!disposed.compareAndSet(false, true)) return
         // processManager/bridgeManager 已注册到 Disposer(this)，此处显式停止保证顺序
         processManager?.dispose()
         processManager = null
         bridgeManager?.dispose()
         bridgeManager = null
+        jsQuery?.dispose()
+        jsQuery = null
+        pendingSend = null
         browser?.dispose()
         browser = null
         com.deepseek.harness.idea.runtime.DshLifecycleManager.getInstance().unregisterPanel(project.name)
         com.deepseek.harness.idea.runtime.DshRuntimeRegistry.getInstance().release(project.name)
+        com.deepseek.harness.idea.runtime.DshCredentialsSync.release(project.name)
     }
 
     fun restart() {
@@ -210,7 +276,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         ApplicationManager.getApplication().invokeLater {
             // 聚焦工具窗口
             com.intellij.openapi.wm.ToolWindowManager.getInstance(project)
-                .getToolWindow("DeepSeek Harness")?.activate(null)
+                .getToolWindow(TOOL_WINDOW_ID)?.activate(null)
             val injected = injectToBrowser(ref)
             if (!injected) {
                 copyToClipboard(ref)
@@ -236,8 +302,6 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
 
     /** JCEF 注入：轮询 dsh web 的 composer textarea，设置值、触发 React input 事件、光标移到末尾（下一行）。 */
     private fun injectToBrowser(selection: String): Boolean {
-        val b = browser ?: return false
-        val cef = try { b.cefBrowser } catch (e: Throwable) { return false }
         val json = escapeJs(selection)
         val script = """
             (() => {
@@ -258,12 +322,134 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
               tryInject();
             })();
         """.trimIndent()
+        return executeInPage(script)
+    }
+
+    /**
+     * 一键发送问题到 DSH（自动提交，不等待用户确认）：
+     * 1. 守卫：在途防重；DSH 未运行 → 剪贴板 + 通知；浏览器缺失 → 剪贴板 + 通知；
+     * 2. 激活工具窗口并切到对话页（主 content 是第一个，避免停在日志 tab）；
+     * 3. JCEF 注入：composer 填入完整问题 + 派发回车自动提交；JBCefJSQuery 回传
+     *    `submitted` / `blocked` / `no-composer` 结果（无通道时乐观提示）；
+     * 4. 成功 → 通知已发送；blocked → 消息留在输入框 + 提示手动回车；失败 → 剪贴板兜底。
+     */
+    fun sendQuestion(text: String) {
+        if (!sending.compareAndSet(false, true)) {
+            LOG.debug("sendQuestion already in flight; ignore duplicate click")
+            return
+        }
+        val token = sendToken.incrementAndGet()
+        pendingSend = PendingSend(token, text)
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                if (!isRunning()) {
+                    copyToClipboard(text)
+                    showNotification(DshBundle.message("sendLogExplanation.notRunning"))
+                    return@invokeLater
+                }
+                if (browser == null) {
+                    copyToClipboard(text)
+                    showNotification(DshBundle.message("sendLogExplanation.failed"))
+                    return@invokeLater
+                }
+                // 聚焦工具窗口并确保对话页（content 0）被选中
+                val tw = com.intellij.openapi.wm.ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
+                tw?.activate(null)
+                tw?.contentManager?.let { cm ->
+                    val main = cm.getContent(0)
+                    if (main != null) cm.setSelectedContent(main, true)
+                }
+                val funcName = jsQuery?.getFuncName()
+                val script = buildSendQuestionScript(text, funcName)
+                if (!executeInPage(script)) {
+                    copyToClipboard(text)
+                    showNotification(DshBundle.message("sendLogExplanation.failed"))
+                    return@invokeLater
+                }
+                if (funcName == null) {
+                    // 无 JBCefJSQuery 通道：无法验证，乐观提示
+                    pendingSend = null
+                    showNotification(DshBundle.message("sendLogExplanation.done"))
+                }
+            } finally {
+                sending.set(false)
+            }
+        }
+    }
+
+    /** 一键发送注入脚本：填 composer → 派发回车 → 轮询判定结果 → window.<funcName> 回传。 */
+    private fun buildSendQuestionScript(text: String, funcName: String?): String {
+        val json = escapeJs(text)
+        val report = if (funcName != null) {
+            "const report = (o) => { try { window.$funcName({ request: o, onSuccess: () => {}, onFailure: () => {} }); } catch (e) {} };"
+        } else {
+            "const report = () => {};"
+        }
+        return """
+            (() => {
+              const deadline = Date.now() + 8000;
+              const text = $json;
+              $report
+              const tryInject = () => {
+                const ta = document.querySelector('textarea');
+                if (!ta) { if (Date.now() < deadline) setTimeout(tryInject, 300); else report('no-composer'); return; }
+                const proto = window.HTMLTextAreaElement.prototype;
+                const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+                setter.call(ta, text);
+                ta.dispatchEvent(new Event('input', { bubbles: true }));
+                setTimeout(() => {
+                  // 回车提交（dsh composer：非 shift 的 Enter → keyboard.submit；智能体忙时入队仍送达）
+                  ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+                  const t0 = Date.now();
+                  const clickSend = () => {
+                    // 仅匹配"发送"按钮（发送/发送消息）；绝不用 class 通配，避免误点运行中的"停止"按钮
+                    const btn = document.querySelector('button[aria-label="Send message"], button[aria-label="发送消息"], button[aria-label="Send"], button[aria-label="发送"]');
+                    if (btn && !btn.disabled) { btn.click(); return true; }
+                    return false;
+                  };
+                  const checkCleared = () => {
+                    const cur = document.querySelector('textarea');
+                    return !cur || cur.value.trim() === '';
+                  };
+                  const poll = () => {
+                    if (checkCleared()) { report('submitted'); return; }
+                    if (Date.now() - t0 < 3000) { setTimeout(poll, 250); return; }
+                    if (clickSend()) {
+                      setTimeout(() => { report(checkCleared() ? 'submitted' : 'blocked'); }, 500);
+                    } else {
+                      report('blocked');
+                    }
+                  };
+                  setTimeout(poll, 400);
+                }, 0);
+              };
+              tryInject();
+            })();
+        """.trimIndent()
+    }
+
+    /** JBCefJSQuery 结果处理（EDT）。 */
+    private fun handleSendOutcome(text: String, outcome: String) {
+        when (outcome) {
+            "submitted" -> showNotification(DshBundle.message("sendLogExplanation.done"))
+            "blocked" -> showNotification(DshBundle.message("sendLogExplanation.blocked"))
+            else -> { // "no-composer" / 未知 → 剪贴板兜底
+                copyToClipboard(text)
+                showNotification(DshBundle.message("sendLogExplanation.failed"))
+            }
+        }
+    }
+
+    /** 在 dsh web 页面执行 JS（成功返回 true）。 */
+    private fun executeInPage(script: String): Boolean {
+        val b = browser ?: return false
+        val cef = try { b.cefBrowser } catch (e: Throwable) { return false }
         return try {
             val pageUrl = runCatching { cef.url }.getOrNull() ?: "about:blank"
             cef.executeJavaScript(script, pageUrl, 0)
             true
         } catch (e: Throwable) {
-            LOG.warn("JCEF injection failed", e)
+            LOG.warn("JCEF executeJavaScript failed", e)
             false
         }
     }
@@ -328,12 +514,142 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
                     browser = it
                     add(it.component, CARD_BROWSER)
                 }
+                // JBCefJSQuery 必须在 loadURL 之前创建：CEF message router 在页面加载时把
+                // window.<funcName> 注入页面；之后创建则函数不存在（自动发送无法回传结果）。
+                setupJsQuery(b)
+                // 页面加载完成后注入"点掉内测声明 + 捕获 API Key"脚本（CEF load handler 触发，
+                // 比 onUrlReady 立即注入可靠；onUrlReady 时页面尚未加载，脚本不会执行）。
+                installLoadHandler(b)
                 b.loadURL(url)
                 cards.show(this, CARD_BROWSER)
             } catch (e: Throwable) {
                 LOG.warn("JCEF failed to load web ui", e)
                 showError(buildJcefError(e))
             }
+        }
+    }
+
+    /** 注册 CEF load handler：主 frame 加载完成后注入前端辅助脚本（内测声明点掉 + API Key 捕获）。 */
+    private fun installLoadHandler(b: JBCefBrowser) {
+        val injected = AtomicBoolean(false)
+        try {
+            b.getJBCefClient().addLoadHandler(object : CefLoadHandlerAdapter() {
+                override fun onLoadEnd(cefBrowser: CefBrowser, frame: CefFrame, httpStatusCode: Int) {
+                    if (!frame.isMain()) return
+                    if (!injected.compareAndSet(false, true)) return
+                    ApplicationManager.getApplication().invokeLater {
+                        runCatching {
+                            executeInPage(buildDismissNoticeScript())
+                            val fn = jsQuery?.getFuncName()
+                            if (fn != null) executeInPage(buildCaptureApiKeyScript(fn))
+                        }
+                    }
+                }
+            }, b.cefBrowser)
+            LOG.info("JCEF load handler installed")
+        } catch (e: Throwable) {
+            LOG.warn("failed to install JCEF load handler", e)
+        }
+    }
+
+    /** 构建捕获 dsh "Add an API key" 弹窗用户输入的 Key 的注入脚本（回传 Java 写 PasswordSafe）。 */
+    private fun buildCaptureApiKeyScript(funcName: String): String = """
+            (() => {
+              const TITLE = 'Add an API key to get started';
+              const SAVES = ['Save and continue', '保存并继续'];
+              const findInput = () => {
+                const inputs = document.querySelectorAll('input');
+                for (const i of inputs) {
+                  const ph = ((i.placeholder || '') + ' ' + (i.getAttribute('aria-label') || '')).toLowerCase();
+                  if (ph.indexOf('api key') >= 0) return i;
+                }
+                return null;
+              };
+              const report = (key) => {
+                try { window.${funcName}({ request: '__apikey__' + key, onSuccess: () => {}, onFailure: () => {} }); } catch (e) {}
+              };
+              const iv = setInterval(() => {
+                const body = document.body ? document.body.innerText : '';
+                if (body.indexOf(TITLE) < 0) return;
+                const input = findInput();
+                if (!input) return;
+                const btns = document.querySelectorAll('button');
+                for (const btn of btns) {
+                  const txt = (btn.textContent || '').trim();
+                  if (SAVES.indexOf(txt) >= 0) {
+                    btn.addEventListener('click', () => {
+                      const cur = findInput();
+                      const k = (cur ? cur.value : input.value).trim();
+                      if (k.length >= 8) report(k);
+                    }, { once: true });
+                    clearInterval(iv);
+                    return;
+                  }
+                }
+              }, 500);
+              setTimeout(() => clearInterval(iv), 120000);
+            })();
+        """.trimIndent()
+
+    /**
+     * 构建"自动点掉内测声明（Internal Testing Notice / 内测声明）"的注入脚本：
+     * 轮询检测模态出现，点击 Continue（en）/继续（zh）按钮一次。acknowledge 后 dsh 写入
+     * settings.yaml（ui-onboarding.welcomeNoticeVersion），同项目后续不再显示。失败静默。
+     */
+    private fun buildDismissNoticeScript(): String = """
+            (() => {
+              const NOTICE_TEXTS = ['Internal Testing Notice', '内测声明'];
+              const BTN_TEXTS = ['Continue', '继续'];
+              const clicked = () => {
+                const btns = document.querySelectorAll('button');
+                for (const btn of btns) {
+                  const t = (btn.textContent || '').trim();
+                  if (BTN_TEXTS.indexOf(t) >= 0) { btn.click(); return true; }
+                }
+                return false;
+              };
+              const iv = setInterval(() => {
+                const body = document.body ? document.body.innerText : '';
+                if (NOTICE_TEXTS.some((t) => body.indexOf(t) >= 0)) {
+                  if (clicked()) clearInterval(iv);
+                }
+              }, 500);
+              setTimeout(() => clearInterval(iv), 15000);
+            })();
+        """.trimIndent()
+
+    /** 创建 JBCefJSQuery 结果通道（失败不阻断：自动发送降级为无验证乐观提示）。 */
+    private fun setupJsQuery(b: JBCefBrowserBase) {
+        try {
+            // create(JBCefBrowserBase) 为跨版本主 API（create(JBCefBrowser) 已弃用且 2026.2 可能移除）
+            val query = JBCefJSQuery.create(b)
+            query.addHandler { payload ->
+                if (payload.startsWith(APIKEY_PREFIX)) {
+                    // dsh "Add an API key" 弹窗输入的 Key：写回插件 PasswordSafe（脱敏显示 + 下次透传）
+                    val key = payload.removePrefix(APIKEY_PREFIX)
+                    ApplicationManager.getApplication().invokeLater {
+                        if (key.isNotBlank()) {
+                            runCatching { com.deepseek.harness.idea.runtime.DshCredentials.writeApiKey(key) }
+                            showNotification(DshBundle.message("settings.apiKey.importedFromDsh"))
+                        }
+                    }
+                } else {
+                    val pending = pendingSend
+                    if (pending != null) {
+                        ApplicationManager.getApplication().invokeLater {
+                            if (pendingSend === pending) {
+                                pendingSend = null
+                                handleSendOutcome(pending.text, payload)
+                            }
+                        }
+                    }
+                }
+                JBCefJSQuery.Response("ok")
+            }
+            jsQuery = query
+        } catch (e: Throwable) {
+            LOG.warn("JBCefJSQuery unavailable; auto-send runs without result verification", e)
+            jsQuery = null
         }
     }
 
@@ -418,6 +734,9 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         return panel
     }
 }
+
+/** 一次"一键发送"的等待态（token 用于丢弃过期回调，text 用于失败时剪贴板兜底）。 */
+private class PendingSend(val token: Long, val text: String)
 
 class OpenSettingsAction : AnAction(DshBundle.message("action.settings"), null, com.intellij.icons.AllIcons.General.Settings) {
     override fun actionPerformed(e: AnActionEvent) {

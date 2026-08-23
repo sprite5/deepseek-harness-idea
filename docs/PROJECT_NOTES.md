@@ -2,7 +2,8 @@
 
 > 本文汇总 DeepSeek Harness IDEA 插件开发过程中的**实测环境事实、踩坑记录、dsh 行为结论**，
 > 供后续任务（Step 6 评审及之后的维护/升级）直接参考，避免重复调查。
-> 最后更新：2026-08-20（Step 1–5 完成 + 手工测试修复 + 一键打包脚本 + Step 6 里程碑评审）
+> 最后更新：2026-08-23（v0.1.3-dev：切换项目工作区根治/每项目隔离 DSH_HOME、dsh 0.1.1-rc.2 升级与回归、
+> 运行日志一键解释、方案C回退方案A、旧 session/投影缓存升级迁移、API Key 脱敏回显 + 全局生效同步）
 
 ---
 
@@ -17,7 +18,7 @@
 | 运行时开发目录 | `tooling/runtime-dev`（`DSH_IDEA_RUNTIME` 指向它）；`build/runtime` 是构建产物（含 bundle） |
 | 自动化沙箱 | pwsh 沙箱拦截工作区外读写与部分出站网络 → **gradle/npm 命令需完整沙箱权限**（仅自动化环境；用户本机无此限制） |
 | 一键打包 | `scripts/build-plugin.bat`（双击；自动探测 JBR/Gradle 缓存，`--no-daemon`，输出产物路径） |
-| 版本号 | 插件版本 = `build.gradle.kts` 第 13 行 `version`；**勿动** `DshHomeManager.DSH_VERSION`（= dsh 运行时版本 `0.1.0-rc.7`，决定运行时目录名） |
+| 版本号 | 插件版本 = `build.gradle.kts` 第 13 行 `version`；`DshHomeManager.DSH_VERSION`（= dsh 运行时版本 `0.1.1-rc.2`，决定生产运行时目录名；勿随意改，升级=重建运行时） |
 | 前向编译检查 | `tooling\gradle-8.14\bin\gradle.bat compileKotlin --no-daemon -PplatformVersion=2026.2`（下载 ideaIC 2026.2 约 1.5GB 到 Gradle 缓存；新平台自带 Kotlin 模块 metadata 高于 2.0.21，已加 `-Xskip-metadata-version-check`；JCEF 自 2026.2 起拆分为内置插件 `com.intellij.modules.jcef`，检查时需列入 `plugins`） |
 
 ### 常用命令（自动化环境需完整权限）
@@ -49,15 +50,16 @@ tooling\gradle-8.14\bin\gradle.bat bundleRuntime
 
 ```
 src/main/kotlin/com/deepseek/harness/idea/
-├── runtime/   DshHomeManager(运行时/DSH_HOME/解压自举) · DshProcessManager(进程+端口发现+重启)
-│             PortParser · DshCredentials(PasswordSafe) · WorkspaceInitializer(默认工作区)
+├── runtime/   DshHomeManager(运行时/DSH_HOME/解压自举/全局配置+每项目副本) · DshProcessManager(进程+端口发现+重启)
+│             PortParser · DshCredentials(PasswordSafe + mask + 凭据文件兜底读取) · WorkspaceInitializer(默认工作区)
+│             LegacySessionMigrator(旧全局 session/投影缓存→隔离目录迁移) · DshCredentialsSync(Web UI 改 key→全局回写)
 │             DshRuntimeRegistry(并发≤3) · DshLifecycleManager / DshAppLifecycleListener(生命周期)
 ├── bridge/    IdeBridgeServer(HTTP+token) · DshBridgeManager(编排) · SentSelectionQueue(环形队列)
 │             IdeBridgeResources(读 mcp-ide-server.mjs)
 ├── mcp/       McpPatchGenerator(ide.yml patch)
 ├── review/    SnapshotManager(基线快照) · SnapshotDiff · ReviewManager
 ├── ui/        DshToolWindowFactory(工具窗口+JCEF+注入) · SendSelectionAction · ReviewChangesAction
-│             DshLogPanel(日志页)
+│             SendLogExplanationAction(运行日志一键解释) · ExplainLogComposer · DshLogPanel(日志页)
 ├── settings/  DshSettingsState · DshSettingsConfigurable · CredentialImporter
 └── i18n/      DshBundle
 src/main/resources/
@@ -70,7 +72,7 @@ src/main/resources/
 
 ---
 
-## 3. dsh 行为事实（0.1.0-rc.7 实测结论）
+## 3. dsh 行为事实（0.1.1-rc.2 实测结论；早期 0.1.0-rc.7 结论经 0.1.1-rc.2 复验兼容）
 
 ### 3.1 启动与 patch
 
@@ -98,7 +100,7 @@ src/main/resources/
 
 ### 3.3 输入框 / 文件引用（重要边界）
 
-- **dsh 0.1.0-rc.7 输入框不支持"文件引用 chip（文件名+行号+X 删除）"**——`@`/`/` 输入触发菜单
+- **dsh 0.1.1-rc.2 输入框不支持"文件引用 chip（文件名+行号+X 删除）"**——`@`/`/` 输入触发菜单
   仅注册了 `/`（command）等源，**无文件源**；`@` 前缀无源时菜单不弹（`roster.length===0` → close），可安全作引用前缀。
 - `fileMentions` 渲染（消息里反引号路径 → 可点击文件 chip）**只匹配"本轮工具产出文件"**（`producedFileMentions`），
   对用户手动发送的代码路径不生效。
@@ -119,6 +121,7 @@ src/main/resources/
 |---|---|---|
 | runtime 树被清空 | `@deepseek-ai/dsh` 等包目录全空、boot 报 MODULE_NOT_FOUND | **junction 陷阱**：递归删除含 junction 的目录会跟随删掉目标（`Remove-Item -Recurse` 与 JUnit `@TempDir` 清理均如此）。修复：删除前先断链（Windows junction 需 `LinkOption.NOFOLLOW_LINKS` 检测 `isOther`）；测试 tearDown 先 `unlinkJunctions` |
 | bat 中文乱码 | `'A' is not recognized` / 命令被拆 | write 工具产出 UTF-8 无 BOM 的 bat，cmd/GBK 解析中文错乱。修复：**bat 全英文纯 ASCII**（见 build-plugin.bat） |
+| **.ps1 中文 + 无 BOM** | `ParserError: 命令字符串中包含未终止的标记 ')'` | Windows PowerShell 5.1 把无 BOM UTF-8 的 .ps1 按 GBK 解析，中文注释变乱码报 `ParserError`。修复：中文 .ps1 须 **UTF-8 BOM**（edit 工具写的是无 BOM，需用 `[System.IO.File]::WriteAllText(p, c, (New-Object System.Text.UTF8Encoding $true))` 写回带 BOM；build-runtime.ps1 踩过，v0.1.3-dev 已加 BOM） |
 | PowerShell 变量 | `$home` 赋值报"read-only" | `$HOME` 是只读变量，测试/脚本变量名避开 `home`（用 `$dshHome`） |
 | UTF-8 BOM | dsh 读 `package.json` 报 JSON 解析失败 | PowerShell `Set-Content -Encoding UTF8` 会写 BOM；用 `[System.IO.File]::WriteAllText(..., UTF8Encoding($false))` |
 | 2024.1 API 勘误 | 编译失败 | 见下表 |
@@ -129,6 +132,14 @@ src/main/resources/
 
 - 无 `com.intellij.util.json.JsonUtil` → 用 Gson（`com.google.gson.Gson`，平台自带）。**v0.1.1 起改为自研 `JsonCodec`**
   （Gson 正被 JetBrains 逐步移出平台，2026.2 前向编译验证通过；见 §3/§6 与 DESIGN §3.1）。
+- **dsh 凭证读取优先级（v0.1.3-dev 关键结论）**：`dsh-credentials-local.resolve()` 为
+  `inherited env > 插件凭据文件 > .env`（源码 `lib/index.js:473`）。**不能给 dsh 进程注入
+  `DEEPSEEK_API_KEY` env**——否则 dsh 永远读 env 旧值，且 Web UI 改 key 会被 `assertUnshadowed()` 拒绝
+  （源码 `lib/index.js:636`，报"supplied read-only by the launching environment"）。所以 key 靠文件
+  （PasswordSafe + 插件全局凭据文件同步），Web UI 改 key 经 `DshCredentialsSync`（WatchService）回写全局。
+- **凭据文件格式**：插件 `syncCredentials()` 写**平铺** `DEEPSEEK_API_KEY: <key>`；dsh
+  credentials-local 会通过 `renderFlatLayoutMigration()` 自动迁移到 `version:1 + refs.DEEPSEEK_API_KEY`；
+  dsh Web UI（Models page）写入的是 **version:1 + refs** 格式。读取需兼容两种（`DshCredentials.readApiKeyFromCredentialFile` 行级解析）。
 
 ### 2026.2 JCEF 拆分（v0.1.1 实测/编译期验证）
 
@@ -152,6 +163,57 @@ src/main/resources/
 - `AppLifecycleListener.appClosing()`（`applicationListeners` 注册）；`ProjectManagerListener.projectClosed(project)`。
 - PasswordSafe 241：`setPassword(CredentialAttributes, String?)` / `getPassword(...)`；旧三参不可用。
 
+### 运行控制台一键解释（v0.1.3-dev，FR-11 实测/源码验证）
+
+- **右键组 id**：Run 控制台右键菜单组是 **`ConsoleView.PopupMenu`**（不是 `ConsoleEditorPopupMenu`）。
+  两版本源码核实：2024.1.7 `ConsoleViewImpl.java:93`（`CONSOLE_VIEW_POPUP_MENU = "ConsoleView.PopupMenu"`）
+  与 2026.2 `ConsoleViewImpl.kt:1668` 同值；弹窗经 `ContextMenuPopupHandler` 挂在控制台 editor 上，
+  `CommonDataKeys.EDITOR`/`PROJECT` 可用，选中文本读 `editor.selectionModel.selectedText`。
+- **dsh composer 提交机制**（`dsh-client-ui-conversation/lib/client.js`，dsh 0.1.0-rc.7 实测 / 0.1.1-rc.2 复验）：
+  - composer 文本区即页面 `<textarea>`（`document.querySelector('textarea')`），React 受控，原生 setter + `input` 事件可驱动（现有注入已验证）；
+  - `onKeyDown`：非 shift 的 Enter → `keyboard.arbitrate("enter") === "pass"` → `keyboard.submit(resolveSubmitMode(...))`；
+    智能体忙时默认 `busyEnter=queue` → **消息入队仍送达**；`machineBusy` 时不会静默丢弃（提交后 composer 清空）；
+  - 发送按钮 `aria-label` 实际为 **"Send message"**（en）/ **"发送消息"**（zh）（`t("input.send")`）；
+    运行中时主按钮变"停止"（`primaryStops`），**回退点击发送按钮绝不能用 class 通配**（避免误点"停止"）。
+- **JBCefJSQuery**：`com.intellij.ui.jcef`（2024.1 平台核心 / 2026.2 jcef 插件，API 一致）：
+  `create(JBCefBrowserBase)` + `addHandler(Function<String, Response>)` + `getFuncName()`；
+  JS 侧 `window.<funcName>({request, onSuccess, onFailure})` 回传字符串。
+  **必须在 `loadURL` 之前创建**（CEF message router 在页面加载时注入 `window.<funcName>`，之后创建函数不存在）；
+  实现 `JBCefDisposable`，随 browser dispose。
+- 发送判定：注入后轮询 ≤3s 判 textarea 值清空 = 提交成功（**不要用 `disabled` 判成功**——composer 锁定态
+  也可能 disabled 但草稿仍在）；未清空再回退点击发送按钮复核。
+
+### 切换项目后工作区为旧项目（v0.1.3-dev 实测修复）
+
+- **现象**：同窗口切换项目 A→B 后，工具窗口仍显示 A 项目的工作区（用户实测复现，截图见
+  顶部出现**两个 "DeepSeek Harness" 标签**）。
+- **根因（最终确认，用户实测反例驱动）**：
+  - dsh 的 workspace 注册表（`workspace.json`）与会话数据**全局共享**（同一 DSH_HOME），
+    `workspace.create` 对**新路径**才 prepend 到最前、对**已存在路径幂等返回既有实体、不重置其
+    状态**；dsh 记住了已打开项目的 workspace/会话状态。
+  - **决定性反例**：用户切到**从未打开过的新项目**无问题（workspace 全新、无历史状态）；切到
+    **之前打开过的旧项目**则复现（workspace 已存在、dsh 恢复其历史会话状态 → 工作区框显示旧项目）。
+  - 曾误判：①"UI 默认落点=列表第一个"（错——`workspace.json` 顺序已正确但 UI 仍显示旧项目）；
+    ②"工具窗口 content 残留"（用户澄清顶部第二个"DeepSeek Harness"是标题/logo，实际单面板无残留）；
+    ③"localStorage `dsh.sessions.current` 恢复当前会话"（测得最新 zip 清空后仍复现，排除）。
+- **修复（最终，用户确认方案）**：**每个项目使用独立 DSH_HOME**（`DshHomeManager.homeDir(projectPath)`
+  = `configDir/dsh-idea/dsh-home/<MD5(projectPath)前16位>`）——dsh 工作区注册表与会话数据按项目
+  隔离，切到任何项目（新旧都一样）工作区都从当前项目"白纸"开始，**从机制上杜绝残留**。
+  - 补充保留：`WorkspaceInitializer.ensureWorkspace` 的 `workspace.insertBefore`（当前项目置顶）、
+    `DshToolWindowPanel.onUrlReady` 清 localStorage `dsh.sessions.current` + reload（防御）、
+    `createToolWindowContent` 旧 content 去重 + `dispose()` 幂等（防御）。
+  - API Key：`syncCredentials(projectPath)` 项目启动时从 PasswordSafe 写入各项目 DSH_HOME；
+    设置页 apply 用 `syncCredentialsAll()` 同步到当前所有打开项目。
+
+**dsh workspace RPC 备忘（实测 dsh 0.1.0-rc.7 / 0.1.1-rc.2 复验）**：
+- 响应格式：`{"type":"server-response","rpcId":"...","result":{"ok":true,"value":{...} | "error":"..."}}`
+  —— `ok/value/error` 都在 **`result`** 里（**不在顶层**）；首次用顶层 `ok` 解析导致 create 误判失败。
+- `workspace.create`：幂等（已存在路径返回既有实体，`value.workspace` + `created:bool`）；新路径才 prepend 到 `workspaceIds`。
+- `workspace.list`：`value.items[].workspaceId`；显示顺序 = `workspaceIds` 数组顺序。
+- `workspace.insertBefore`：payload `{workspaceId, beforeWorkspaceId?}`（anchor 省略 = 追加末尾），
+  响应 `value.workspaceIds`（完整新顺序）。
+- `workspace.json` 落盘路径为 **Windows 反斜杠**（如 `D:\proj\MyApp`），断言/比较注意分隔符。
+
 ---
 
 ## 5. 打包 / 运行时（Step 5 实测）
@@ -162,7 +224,7 @@ src/main/resources/
 - 运行期自举：`DshHomeManager.hasRuntime()` 在本地缺失且无 `DSH_IDEA_RUNTIME` 时从插件资源解压
   （幂等；`unzip` 兼容顶层单目录前缀剥离 + zip-slip 防护；实测解压 62s，解压后 dsh web 可启动）。
 - 插件 zip 约 98MB（含 106.9MB 压缩运行时），符合 PRD 体积预期（150-300MB 内）。
-- Node 版本：**v22.23.2**（npmmirror 二进制镜像；SHA256 `1177B413...`）；dsh 固定 `@deepseek-ai/dsh@0.1.0-rc.7`。
+- Node 版本：**v22.23.2**（npmmirror 二进制镜像；SHA256 `1177B413...`）；dsh 固定 `@deepseek-ai/dsh@0.1.1-rc.2`。
 
 ---
 
@@ -170,11 +232,11 @@ src/main/resources/
 
 | 层 | 类 | 说明 |
 |---|---|---|
-| 单元 | PortParserTest / McpPatchGeneratorTest / SnapshotDiffTest / PathFiltersTest / SentSelectionQueueTest / WorkspaceInitializerTest / DshRuntimeRegistryTest / CredentialImporterTest / **JsonCodecTest（v0.1.1）** | 纯 JUnit，无 IDE 依赖 |
-| 集成冒烟 | DshBootstrapSmokeTest（真实 dsh 启动 + workspace 注册断言）/ DshMcpBridgeSmokeTest（mock bridge + MCP tools/list 6 工具 + failOnStartupError 严格启动） | 需 `DSH_IDEA_RUNTIME`，否则跳过 |
+| 单元 | PortParserTest(4) / McpPatchGeneratorTest(6) / SnapshotDiffTest(5) / PathFiltersTest(5) / SentSelectionQueueTest(5) / WorkspaceInitializerTest(12) / DshRuntimeRegistryTest(3) / CredentialImporterTest(4) / **JsonCodecTest(v0.1.1,9)** / **ExplainLogComposerTest(v0.1.3-dev,4)** / **LegacySessionMigratorTest(v0.1.3-dev,14)** / **DshCredentialsMaskTest(v0.1.3-dev,10)** / **DshCredentialsSyncTest(v0.1.3-dev,6)** | 纯 JUnit，无 IDE 依赖 |
+| 集成冒烟 | DshBootstrapSmokeTest(真实 dsh 启动 + workspace 注册断言) / DshMcpBridgeSmokeTest(mock bridge + MCP tools/list 6 工具 + failOnStartupError 严格启动) / WorkspaceInitializerSmokeTest(切换项目工作区顺序) / **LegacySessionMigratorSmokeTest(v0.1.3-dev：zstd session 迁移后 workspace.json 自动挂接)** | 需 `DSH_IDEA_RUNTIME`，否则跳过 |
 
 - 冒烟测试注意：临时 DSH_HOME 内 dsh 自愈 junction 指向 runtime → **tearDown 必须先 unlinkJunctions 再让 `@TempDir` 清理**，否则清空 runtime（见 §4）。
-- 测试计数：**45 个**（截至 v0.1.1；36 基础 + JsonCodecTest 9；沙箱下需完整权限，否则 Gradle native 服务初始化失败）。
+- 测试计数：**90 个**（截至 v0.1.3-dev；86 单元 + 4 集成冒烟；沙箱下需完整权限，否则 Gradle native 服务初始化失败）。
 
 ---
 

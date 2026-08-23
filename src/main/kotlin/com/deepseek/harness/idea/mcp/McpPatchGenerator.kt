@@ -28,8 +28,12 @@ object McpPatchGenerator {
     private const val TOOL_TIMEOUT_MS = 60000
     private const val RECONNECT_MAX_ATTEMPTS = 3
 
-    /** 根据 MCP server 地址生成 patch 文本（mcpPort 动态填入）。 */
-    fun generate(mcpPort: Int, host: String = "127.0.0.1"): String {
+    /**
+     * 根据 MCP server 地址生成 patch 文本（mcpPort 动态填入）。
+     * [globalConfigDir] 非空时，追加 `$settings`/`$credentials`（cordis patch 的"修改已有单元"语法，
+     * 按 id 覆盖其 config）把 dsh 的设置/凭据 path 指向全局唯一配置文件 —— 实现"配置共享 + 数据隔离"（方案 C）。
+     */
+    fun generate(mcpPort: Int, host: String = "127.0.0.1", globalConfigDir: String = ""): String {
         val url = "http://$host:$mcpPort/mcp"
         return buildString {
             appendLine("- insert:")
@@ -43,12 +47,21 @@ object McpPatchGenerator {
             appendLine("        reconnect:")
             appendLine("          enabled: true")
             appendLine("          maxAttempts: $RECONNECT_MAX_ATTEMPTS")
+            if (globalConfigDir.isNotBlank()) {
+                val g = globalConfigDir.replace('\\', '/')
+                appendLine("- \$settings:")
+                appendLine("    config:")
+                appendLine("        path: '$g/settings.yaml'")
+                appendLine("- \$credentials:")
+                appendLine("    config:")
+                appendLine("        path: '$g/.credentials.yaml'")
+            }
         }
     }
 
     /** 生成带 failOnStartupError 的严格形态（测试/诊断用）：连接或工具同步失败即拒绝启动。 */
-    fun generateStrict(mcpPort: Int, host: String = "127.0.0.1"): String {
-        val base = generate(mcpPort, host)
+    fun generateStrict(mcpPort: Int, host: String = "127.0.0.1", globalConfigDir: String = ""): String {
+        val base = generate(mcpPort, host, globalConfigDir)
         return base.replace(
             "        toolCallTimeoutMs: $TOOL_TIMEOUT_MS\n",
             "        toolCallTimeoutMs: $TOOL_TIMEOUT_MS\n        failOnStartupError: true\n"

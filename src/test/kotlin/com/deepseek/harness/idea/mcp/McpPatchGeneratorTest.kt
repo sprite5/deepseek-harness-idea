@@ -41,4 +41,21 @@ class McpPatchGeneratorTest {
         assertTrue(strict.contains("url: http://127.0.0.1:5000/mcp"))
         assertTrue(!base.contains("failOnStartupError"))
     }
+
+    @Test
+    fun `omits settings-credentials global path when globalConfigDir blank`() {
+        val patch = McpPatchGenerator.generate(8080)
+        assertTrue(!patch.contains("\$settings"), "no \$settings when no global config: $patch")
+        assertTrue(!patch.contains("\$credentials"), "no \$credentials when no global config: $patch")
+        assertTrue(!patch.contains("settings.yaml"), "no settings.yaml when no global config: $patch")
+    }
+
+    @Test
+    fun `adds settings-credentials global path when globalConfigDir set`() {
+        val patch = McpPatchGenerator.generate(8080, "127.0.0.1", "C:\\cfg\\dsh-home")
+        assertTrue(patch.contains("- \$settings:"), "must add \$settings: $patch")
+        assertTrue(patch.contains("- \$credentials:"), "must add \$credentials: $patch")
+        assertTrue(patch.contains("path: 'C:/cfg/dsh-home/settings.yaml'"), "settings path must be forward-slash global: $patch")
+        assertTrue(patch.contains("path: 'C:/cfg/dsh-home/.credentials.yaml'"), "credentials path must be forward-slash global: $patch")
+    }
 }

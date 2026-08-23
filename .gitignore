@@ -29,5 +29,5 @@ Thumbs.db
 # ---- dsh 运行时数据（防御性；正常位于 IDE 配置目录）----
 sessions/
 storages/
-runtime/
+/runtime/
 dsh-home*/

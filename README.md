@@ -21,6 +21,8 @@ changes with native diff tooling.
 - **以项目为工作区 / Workspace-bound agent** — 智能体以当前项目目录为工作区（启动时自动注册），可读取、新建、修改项目文件。
 - **MCP 桥接 IDE 上下文 / IDE context via MCP** — 智能体可通过 `mcp__ide__*` 工具读取当前选中代码、打开的文件、项目树，并打开/定位文件。
 - **发送选中代码 / Send selection to DSH** — 右键选中代码发送紧凑文件引用（`@路径#L1-14`）；完整代码可随时被智能体拉取（剪贴板兜底）。
+- **运行日志一键解释 / One-click log explanation** — 在项目运行控制台选中一段日志，右键"DSH 一键解释"，自动把解释请求 + 日志提交给 DSH（无需手动粘贴/回车）。
+- **每项目独立工作区 / Per-project workspace** — 每个项目使用独立的 DSH_HOME，工作区按项目隔离；切换项目后 DSH 自动以当前项目为工作空间，不会残留其他项目的工作区。
 - **审查与还原 / Review & restore** — 基线快照 + 原生 diff（修改/新增/删除），支持还原单个/全部、忽略、重新基线。
 - **自包含运行时 / Self-contained runtime** — Node.js 与 DeepSeek Harness 运行时随插件打包，首次使用自动解压，无需单独安装或联网。
 - **生命周期管理 / Lifecycle** — 每项目一个实例（并发上限 3）；项目关闭 / IDE 退出自动终止进程；崩溃自动退避重启。
@@ -31,14 +33,14 @@ changes with native diff tooling.
 
 - IntelliJ IDEA Community / Ultimate **2024.1 – 2026.2**（build 241 – 262；Windows 10/11 x64；macOS/Linux 规划中）
 - 持有 DeepSeek API Key（`deepseek-chat` / `deepseek-reasoner`）
-- 构建机器需要网络（构建时下载 Node.js 22.23.2 与 `@deepseek-ai/dsh@0.1.0-rc.7`）；**运行时离线可用**（已打包进插件）
+- 构建机器需要网络（构建时下载 Node.js 22.23.2 与 `@deepseek-ai/dsh@0.1.1-rc.2`）；**运行时离线可用**（已打包进插件）
 
 ## 安装 / Install
 
 1. 构建插件 zip（见下）或下载 [Releases](../../releases) 中的 `deepseek-harness-idea-<version>.zip`（约 98MB，含运行时）。
 2. IDEA 中 `Settings → Plugins → ⚙ → Install Plugin from Disk…` 选择该 zip，重启 IDE。
 3. 打开右侧 **DeepSeek Harness** 工具窗口（首次打开自动解压内置运行时，约 1 分钟）。
-4. `Settings → Tools → DeepSeek Harness` 填入 DeepSeek API Key（或从 `~/.dsh` 一键导入）并应用，开始对话。
+4. `Settings → Tools → DeepSeek Harness` 填入 DeepSeek API Key（或从本机已有 DeepSeek 配置一键导入）并应用，开始对话。
 
 ## 构建 / Build
 
@@ -70,7 +72,7 @@ IntelliJ IDEA (JVM/EDT)
 │    /health /selection /open-files /project-tree /sent-selection /open-file /reveal
 ├─ Snapshot & Review Manager（基线快照 → diff → 还原/忽略）
 └─ DshProcessManager（Node 子进程：端口发现、健康检查、崩溃退避重启）
-        │  node <dsh>/bin.js --profile web --patch ide.yml --host 127.0.0.1 --port 0
+        │  node <dsh>/bin.js --profile web --patch ide.yml --host 127.0.0.1 --port 0 --no-open
         ▼
 Node 子进程（DSH）
 ├─ dsh web server（仅 loopback）
@@ -88,7 +90,7 @@ Node 子进程（DSH）
 
 ## 测试 / Tests
 
-- 45 个测试：43 单元 + 2 集成冒烟（真实 dsh 启动 / MCP 桥接 6 工具）。
+- 90 个测试：86 单元 + 4 集成冒烟（真实 dsh 启动 / MCP 桥接 6 工具 / 切换项目工作区顺序 / 旧会话升级迁移）。
 - 冒烟测试需要 `DSH_IDEA_RUNTIME` 指向预构建运行时目录，否则自动跳过。
 
 ## 许可 / License

@@ -52,7 +52,7 @@ param(
     [string]$OutputDir = "build/runtime",
     [string]$NodeVersion = "22.23.2",
     [string]$NodeSha256 = "1177B4137BA5ADAA56354AE40F1080C7450E8AE09CECB47DA459D1C52AC99F97",
-    [string]$DshVersion = "0.1.0-rc.7",
+    [string]$DshVersion = "0.1.1-rc.2",
     [string]$Mirror = "https://registry.npmmirror.com/-/binary/node",
     [string]$NpmRegistry = "",
     [string]$CacheDir = "",

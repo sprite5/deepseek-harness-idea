@@ -149,6 +149,17 @@
                 icon="/icons/dsh-toolwindow.svg">
             <add-to-group group-id="EditorPopupMenu" anchor="first"/>
         </action>
+
+        <!-- 运行控制台右键"DSH 一键解释"：选中日志作为用户问题自动提交（不等待确认）。
+             ConsoleView.PopupMenu 为 Run 控制台右键组（2024.1 ConsoleViewImpl.java:93 与
+             2026.2 ConsoleViewImpl.kt:1668 同 id；见 docs/DESIGN.md §3.11）。 -->
+        <action id="dsh.sendLogExplanation"
+                class="com.deepseek.harness.idea.ui.SendLogExplanationAction"
+                text="DSH 一键解释"
+                description="Send the selected console log to the embedded DeepSeek Harness for explanation"
+                icon="/icons/dsh-toolwindow.svg">
+            <add-to-group group-id="ConsoleView.PopupMenu" anchor="first"/>
+        </action>
     </actions>
 
     <applicationListeners>

@@ -58,7 +58,7 @@ DeepSeek Harness（DSH）是一个以本地 Web UI（`dsh web`，默认 `http://
 |---|---|---|---|
 | US-01 | 开发者 | 作为 IDEA 用户，我安装插件并打开项目后，希望工具窗口直接显示可用的 DSH 界面 | 工具窗口可打开；无 Node/dsh 安装步骤；首次运行自动完成运行时解压 |
 | US-02 | 开发者 | 作为 IDEA 用户，我希望在设置页配置 DeepSeek API Key 后即可使用 | 填写 Key 并应用后，新会话可正常发起对话；Key 缺失时界面给出明确提示并引导到设置页 |
-| US-03 | 开发者 | 作为 IDEA 用户，我希望把本机已有的 `~/.dsh` 凭据一键导入，避免重复输入 | 设置页"从 ~/.dsh 导入"可读取 `DEEPSEEK_API_KEY` 并填入 |
+| US-03 | 开发者 | 作为 IDEA 用户，我希望把本机已有的 DeepSeek 凭据一键导入，避免重复输入 | 设置页"从本机导入"可读取 `DEEPSEEK_API_KEY` 并填入 |
 | US-04 | 开发者 | 作为 IDEA 用户，我希望智能体以当前项目目录为工作区读写文件 | 智能体可读取项目文件内容；新建文件出现在项目树；修改内容可从磁盘读到 |
 | US-05 | 开发者 | 作为 IDEA 用户，我希望智能体能看到"我选中的代码/打开的文件" | 智能体调用 `mcp__ide__*` 工具可获取选中文本、打开文件列表、项目树 |
 | US-06 | 开发者 | 作为 IDEA 用户，我希望右键选中代码可一键发送给智能体 | 动作后工具窗口聚焦并出现对应提示；智能体可获取该代码（即使注入失败也可通过工具拉取） |
@@ -86,15 +86,15 @@ DeepSeek Harness（DSH）是一个以本地 Web UI（`dsh web`，默认 `http://
 - FR-02.6 并发上限：同时运行的实例 ≤ 3，超出给出提示。
 
 ### FR-03 设置页（P0）
-- FR-03.1 API Key：密码输入，存入 `PasswordSafe`，应用时写入 `$DSH_HOME/.credentials.yaml`（键 `DEEPSEEK_API_KEY`），并提示"重启会话生效"。
+- FR-03.1 API Key：存入 `PasswordSafe`（应用级），应用时写入插件全局凭据文件（键 `DEEPSEEK_API_KEY`）并同步到各项目 DSH_HOME；**设置页脱敏回显**（前 6 位 + ****** + 后 6 位）；**dsh Web UI 改 key 也经 `DshCredentialsSync` 同步回全局**，保证所有子项目一致；提示"重启会话生效"。
 - FR-03.2 模型选择：`deepseek-chat` / `deepseek-reasoner`，默认 `deepseek-chat`。
 - FR-03.3 Base URL（可选，默认 `https://api.deepseek.com`），用于代理/自定义网关。
-- FR-03.4 "从 ~/.dsh 导入凭据"：读取 `~/.dsh/.credentials.yaml` 的 `DEEPSEEK_API_KEY` 填入。
+- FR-03.4 "从本机导入凭据"：读取用户本机已有 DeepSeek 凭据文件的 `DEEPSEEK_API_KEY` 填入。
 - FR-03.5 高级项：DSH_HOME 位置（默认插件配置目录）、日志级别。
 
 ### FR-04 项目绑定（P0）
-- FR-04.1 启动 Node 时 cwd=项目根目录，使默认工作区 = 项目目录。
-- FR-04.2 "附加项目工作区"动作：在 Web UI 中创建/切换到绑定该项目的会话（通过工作区 API 或 Web UI 操作，实现细节见 DESIGN）。
+- FR-04.1 启动 Node 时 cwd=项目根目录，使默认工作区 = 项目目录；**每个项目使用独立 DSH_HOME**（工作区/会话数据按项目隔离，切换项目后从当前项目白纸开始）。
+- FR-04.2 "附加项目工作区"：启动后自动把项目根注册为默认工作区（`WorkspaceInitializer` 调 dsh RPC `workspace.create` + `workspace.insertBefore` 置顶；无需手动动作）。
 
 ### FR-05 代码上下文发送（P0）
 - FR-05.1 编辑器右键菜单："发送选中代码到 DSH"（读取选中文本+文件路径+语言，容量上限 64KB）。
@@ -132,6 +132,12 @@ DeepSeek Harness（DSH）是一个以本地 Web UI（`dsh web`，默认 `http://
 - FR-10.1 "在外部浏览器打开"：`Desktop.browse(http://127.0.0.1:<port>)`。
 - FR-10.2 用于 JCEF 异常、中文输入法异常、Web UI 与 JCEF 不兼容等场景。
 
+### FR-11 运行日志一键解释（P1，v0.1.3-dev 已实现）
+- FR-11.1 运行控制台（Run 控制台，ConsoleView）选中日志后右键出现"DSH 一键解释"；无选中文本时不显示。
+- FR-11.2 点击后**不等待用户确认**：本地化解释指令 + 选中日志作为用户问题自动提交给 DSH 对话（JCEF 填 composer + 派发回车）。
+- FR-11.3 结果反馈：成功 / 阻塞 / 失败均有通知；失败降级剪贴板；DSH 未运行明确提示。
+- FR-11.4 超长日志（>64KB）截断并注明。
+
 ## 6. 非功能需求（NFR）
 
 | 编号 | 类别 | 要求 |
@@ -139,7 +145,7 @@ DeepSeek Harness（DSH）是一个以本地 Web UI（`dsh web`，默认 `http://
 | NFR-01 | 性能 | 首次解压后，工具窗口从打开到可对话 ≤ 15s（本地磁盘、正常机器）；Node 实例空闲内存可接受（dsh 正常水平）；UI 操作不阻塞 EDT |
 | NFR-02 | 安全 | 所有服务仅绑定 127.0.0.1；MCP/Bridge 间使用随机 token；API Key 不落日志、不落插件源代码；不使用 `--host 0.0.0.0`（dsh 本身拒绝） |
 | NFR-03 | 可靠性 | 安装/解压幂等；崩溃可自动重启（退避）；项目关闭/IDE 退出无残留进程；磁盘写失败有明确报错 |
-| NFR-04 | 可维护性 | dsh 版本固定（`@deepseek-ai/dsh@0.1.0-rc.7`），升级=重建运行时；DSH_HOME 版本化目录便于升级；模块边界清晰（runtime/bridge/mcp/review/ui/settings 分离） |
+| NFR-04 | 可维护性 | dsh 版本固定（`@deepseek-ai/dsh@0.1.1-rc.2`），升级=重建运行时；DSH_HOME 版本化目录便于升级；模块边界清晰（runtime/bridge/mcp/review/ui/settings 分离） |
 | NFR-05 | 兼容性 | IntelliJ IDEA 2024.1 – 2026.2（Community/Ultimate，until 262.*）；Windows 10/11 x64；路径含空格/中文可用；JCEF 不可用有降级 |
 | NFR-06 | 可用性 | 关键失败（缺 Key、Node 缺失、端口异常、崩溃）均有中文+英文明确提示与恢复路径；不静默失败 |
 
@@ -155,14 +161,15 @@ MVP 成功标准：全新 IDEA 实例中，安装插件 zip → 配置 API Key �
 6. 提问"当前打开的文件是什么"，智能体通过 MCP 工具正确回答。
 7. 关闭项目/IDE 后无残留 node 进程。
 8. 切换 IDE 语言（中/英）后插件文案跟随。
+9. 运行控制台选中一段日志，右键"DSH 一键解释"，DSH 对话自动出现解释请求并可正常回复。
 
 ## 8. 假设与依赖
 
 - Windows 10/11 x64；IntelliJ IDEA Community/Ultimate 2024.1 – 2026.2（until 262.*）。
 - 用户持有 DeepSeek API Key（`deepseek-chat` / `deepseek-reasoner` 可用）。
 - 构建机有网络（构建时下载 Node 与 dsh 依赖）；**运行时离线可用**（运行时已打包）。
-- dsh 版本固定 0.1.0-rc.7（与当前环境一致），其 Web UI 与 `--patch`/mcp-client 行为以该版本为准。
-- 插件不修改用户 `~/.dsh`（独立 DSH_HOME），避免与浏览器版 dsh 互相干扰。
+- dsh 版本固定 0.1.1-rc.2（与当前环境一致），其 Web UI 与 `--patch`/mcp-client 行为以该版本为准。
+- 插件不修改用户本机已有的 DeepSeek 配置（独立 DSH_HOME），避免与浏览器版 dsh 互相干扰。
 
 ## 9. 风险与缓解
 
@@ -174,7 +181,7 @@ MVP 成功标准：全新 IDEA 实例中，安装插件 zip → 配置 API Key �
 | JCEF 兼容性（WebSocket/IME） | 聊天/中文输入异常 | "外部浏览器打开"按钮兜底；JCEF 版本随 IDE 更新 |
 | 多项目并发资源占用 | 内存/端口 | 每项目实例 + 并发上限 3 + 懒启动；后续可优化为单实例多工作区 |
 | 杀软拦截 node.exe | 启动失败 | 文档说明加白名单；日志可诊断；失败提示明确 |
-| dsh web UI 依赖最新前端构建 | 功能缺失 | 固定 dsh 版本并与当前 GUI 版本对齐（0.1.0-rc.7） |
+| dsh web UI 依赖最新前端构建 | 功能缺失 | 固定 dsh 版本并与当前 GUI 版本对齐（0.1.1-rc.2） |
 
 ## 10. 迭代规划与范围管理
 

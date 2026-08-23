@@ -8,10 +8,8 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.lang.LanguageUtil
 
 /**
@@ -52,7 +50,7 @@ class SendSelectionAction : AnAction(DshBundle.message("action.sendSelection")) 
             )
         }
 
-        val panel = findPanel(project)
+        val panel = DshToolWindowPanel.find(project)
         if (panel == null) {
             LOG.warn("Dsh tool window panel not available; clipboard fallback")
             ApplicationManager.getApplication().invokeLater {
@@ -64,12 +62,6 @@ class SendSelectionAction : AnAction(DshBundle.message("action.sendSelection")) 
         ApplicationManager.getApplication().invokeLater {
             panel.sendSelection(data.filePath, data.language, data.selection, data.lineStart, data.lineEnd)
         }
-    }
-
-    private fun findPanel(project: Project): DshToolWindowPanel? {
-        val tw = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID) ?: return null
-        if (tw.contentManager.contentCount == 0) return null
-        return tw.contentManager.getContent(0)?.component as? DshToolWindowPanel
     }
 
     private fun copyToClipboard(text: String) {
@@ -104,6 +96,5 @@ class SendSelectionAction : AnAction(DshBundle.message("action.sendSelection")) 
     companion object {
         private val LOG = Logger.getInstance(SendSelectionAction::class.java)
         private const val MAX_BYTES = 64 * 1024
-        const val TOOL_WINDOW_ID = "DeepSeek Harness"
     }
 }
