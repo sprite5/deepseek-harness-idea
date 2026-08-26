@@ -13,7 +13,7 @@
  *
  * 工具（模型侧名 mcp__ide__<raw>，见 docs/DESIGN.md §4.2）：
  *   ide_get_selection / ide_get_open_files / ide_get_project_tree / ide_get_sent_selection
- *   / ide_open_file / ide_reveal_file
+ *   / ide_open_file / ide_reveal_file / ide_refresh_files
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -94,6 +94,13 @@ server.registerTool('ide_reveal_file', {
     path: z.string().describe('文件绝对路径'),
   },
 }, async ({ path }) => bridge('POST', '/reveal', { path }));
+
+server.registerTool('ide_refresh_files', {
+  description: '刷新 IntelliJ VFS，使 IDE 重新读取外部进程修改或新建的文件',
+  inputSchema: {
+    paths: z.array(z.string()).describe('要刷新的文件或目录绝对路径；为空时刷新当前项目').optional(),
+  },
+}, async ({ paths }) => bridge('POST', '/refresh', { paths: paths ?? [] }));
 
 const app = createMcpExpressApp();
 

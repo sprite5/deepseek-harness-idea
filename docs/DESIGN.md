@@ -328,6 +328,7 @@ dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录�
 | GET | /sent-selection | token | `?latest=1` | `{id,filePath,language,selection,ts}` 或 `{error:"empty"}` |
 | POST | /open-file | token | `{path}` | `{ok}` |
 | POST | /reveal | token | `{path}` | `{ok}` |
+| POST | /refresh | token | `{paths?: string[]}` | `{ok, refreshed, missing}`；省略 paths 时刷新项目根 |
 
 统一错误：`{error: string, code: string}`；未带/错 token → 401。
 
@@ -340,7 +341,8 @@ dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录�
 | ide_get_project_tree | `depth?` | GET /project-tree | 项目结构 |
 | ide_get_sent_selection | — | GET /sent-selection?latest=1 | 最近发送的代码 |
 | ide_open_file | `path` | POST /open-file | 在 IDE 打开（P1） |
-| ide_reveal_file | `path` | POST /reveal | 项目树定位（P1） |
+| ide_reveal_file | `path` | POST /reveal | 项目树定位（P1，打开前同步刷新） |
+| ide_refresh_files | `paths?` | POST /refresh | 同步刷新指定文件/目录；省略时刷新项目根 |
 
 ### 4.3 进程启动与环境
 
