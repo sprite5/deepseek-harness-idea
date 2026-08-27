@@ -177,6 +177,13 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
                     project.name, homePath.resolve(".credentials.yaml")
                 )
 
+                // dsh Web Models page 改 llm-pi-ai 节（第三方 LLM provider）监听：dsh 写当前项目
+                // DSH_HOME/settings.yaml 的 llm-pi-ai: 节 → 回写到全局 settings.yaml 真源，
+                // 跨项目共享第三方 provider 配置（方案 A：只做 A，不做 UI）。
+                com.deepseek.harness.idea.runtime.DshSettingsSync.register(
+                    project.name, homePath.resolve("settings.yaml")
+                )
+
                 // Step 3：MCP 桥接编排（bridge + mcp-ide-server + ide.yml patch）
                 val bridge = DshBridgeManager(
                     project = project,
@@ -247,6 +254,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         com.deepseek.harness.idea.runtime.DshLifecycleManager.getInstance().unregisterPanel(project.name)
         com.deepseek.harness.idea.runtime.DshRuntimeRegistry.getInstance().release(project.name)
         com.deepseek.harness.idea.runtime.DshCredentialsSync.release(project.name)
+        com.deepseek.harness.idea.runtime.DshSettingsSync.release(project.name)
     }
 
     fun restart() {
@@ -529,23 +537,21 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         }
     }
 
-    /** 注册 CEF load handler：主 frame 加载完成后注入前端辅助脚本（内测声明点掉 + API Key 捕获 + 侧边栏图标缩放）。
-     *  DSH 上游 Web UI 的侧边栏图标尺寸是固定的（Vite/React 渲染，无官方 CSS hook）。
-     *  在 IDEA 工具窗口里偏大、占空间；这里在每次主 frame 加载完成后注入一段 CSS，
-     *  把侧边栏 svg + 按钮 + 容器整体缩窄。失败静默，不影响其他注入。 */
+    /** 注册 CEF load handler：主 frame 加载完成后注入前端辅助脚本（内测声明点掉 + API Key 捕获）。
+     *  侧栏图标缩放 CSS 已移除：默认集成的 dsh-mobile-hanui 在窄视口把侧栏变抽屉 + FAB，
+     *  聊天区占满全宽，不再需要单独缩小侧栏图标。 */
     private fun installLoadHandler(b: JBCefBrowser) {
         try {
             b.getJBCefClient().addLoadHandler(object : CefLoadHandlerAdapter() {
                 override fun onLoadEnd(cefBrowser: CefBrowser, frame: CefFrame, httpStatusCode: Int) {
                     if (!frame.isMain()) return
                     // 不再 compareAndSet 守门：onLoadEnd 在路由切换/SPA 重渲染时会再次触发，
-                    // 注入 CSS 是幂等的（先移除旧 style 再 append 新 style），每次都补一次最稳。
+                    // 注入是幂等的（先移除旧 style 再 append 新 style），每次都补一次最稳。
                     ApplicationManager.getApplication().invokeLater {
                         runCatching {
                             executeInPage(buildDismissNoticeScript())
                             val fn = jsQuery?.getFuncName()
                             if (fn != null) executeInPage(buildCaptureApiKeyScript(fn))
-                            executeInPage(buildSidebarShrinkScript())
                         }
                     }
                 }
@@ -557,46 +563,8 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
     }
 
     /**
-     * 构建"缩小侧边栏图标 + 探测真实 DOM"的注入脚本（幂等；多次执行安全）。
-     * 策略：
-     *   1) 先探测：扫描页面里"看起来像侧栏按钮"的元素（icon 独占一格、首列位置、左上角等），
-     *      dump 出 tag/class/role/data-* 等属性，通过 JBCefJSQuery 通道回传给 Java 写日志；
-     *   2) 同时按"宽口径多候选选择器"注入 CSS，多条规则互相兜底；
-     *   3) 探测结果出来后（看 DSH Log），下一次 buildPlugin 时换成精准选择器即可。
-     * 即使完全不命中，副作用也只是日志多几行。
+     * 构建捕获 dsh "Add an API key" 弹窗用户输入的 Key 的注入脚本（回传 Java 写 PasswordSafe）。
      */
-    private fun buildSidebarShrinkScript(): String = """
-        (() => {
-          // 仅缩小 DSH Web 侧栏/按钮里的 svg 图标（不触碰任何容器宽度/布局）。
-          const CSS = `
-            aside svg,
-            nav svg,
-            button svg, a svg,
-            [class*="sidebar" i] svg,
-            [class*="Sidebar" i] svg,
-            [data-sidebar] svg,
-            button[class*="icon" i] svg,
-            a[class*="icon" i] svg,
-            [class*="IconButton" i] svg,
-            [role="button"] svg {
-              width: 14px !important;
-              height: 14px !important;
-            }
-          `;
-          const STYLE_ID = 'dsh-idea-sidebar-icon-shrink';
-          const head = document.head || document.documentElement;
-          if (head) {
-            const old = document.getElementById(STYLE_ID);
-            if (old) old.remove();
-            const s = document.createElement('style');
-            s.id = STYLE_ID; s.type = 'text/css';
-            s.appendChild(document.createTextNode(CSS));
-            head.appendChild(s);
-          }
-        })();
-        """.trimIndent()
-
-    /** 构建捕获 dsh "Add an API key" 弹窗用户输入的 Key 的注入脚本（回传 Java 写 PasswordSafe）。 */
     private fun buildCaptureApiKeyScript(funcName: String): String = """
             (() => {
               const TITLE = 'Add an API key to get started';

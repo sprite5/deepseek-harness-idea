@@ -31,3 +31,11 @@ sessions/
 storages/
 /runtime/
 dsh-home*/
+
+# ---- 本地打包笔记 / 排错记录（不入库）----
+docs/PACKAGING_LOCAL.md
+docs/PACKAGING_LOCAL.zh.md
+scripts/PACKAGING_LOCAL*.md
+
+# ---- npm 调试残留（手动 build runtime 时可能生成）----
+package-lock.json
