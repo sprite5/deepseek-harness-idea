@@ -35,7 +35,8 @@
 
 ## 安装 / Install
 
-1. 下载 [Releases](../../releases) 的 `deepseek-harness-idea-<version>.zip`（约 98MB，含运行时）。
+1. ~~~下载 [Releases](../../releases) 的 `deepseek-harness-idea-<version>.zip`（约 98MB，含运行时）。~~~
+   - 当前需要自行打包,clone本任务,直接让任意agent帮你打个包
 2. `Settings → Plugins → ⚙ → Install Plugin from Disk…` 选择该 zip，重启 IDE。
 3. 打开右侧 **DeepSeek Harness** 工具窗口（首次自动解压内置运行时）。
 4. `Settings → Tools → DeepSeek Harness` 填入 DeepSeek API Key，开始对话。
