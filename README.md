@@ -18,11 +18,13 @@
 
 ## 与上游的差异 / Differences from upstream
 
-- **刷新同步**：新增 `POST /refresh` 桥接 + `ide_refresh_files` MCP 工具。智能体改/新建文件后 IDE VFS
+- **刷新同步**：新增 `POST /refresh` 桥接 + `ide_refresh_files` MCP 工具。智能体写改/新建文件后 IDE VFS
   不会自动刷新（改动不显示、新文件看不到），现在打开/定位文件前会同步刷新，也可显式刷新整个项目。
 - **菜单条优化**：默认内置 [dsh-mobile-hanui](https://github.com/Z-6354/dsh-mobile-hanui)，窄视口下
   侧栏/详情面板变抽屉 + FAB，聊天区占满全宽；同时移除了原先手动缩小侧栏图标的 CSS 注入。
-- **其它**：每项目独立 DSH_HOME + 全局配置共享、旧会话升级迁移、API Key 脱敏回显、Web UI 改 key 全局生效。
+- **配置同步**：多项目环境下的凭据与第三方 LLM 配置跨项目双向同步。在任意项目的 Web UI（Models / Settings）
+  中添加、修改第三方 Provider（`llm-pi-ai`）或 API Key，文件监听器会自动回写到全局真源，新开/其他项目无需重复配置即可直接共享。
+- **其它**：每项目独立工作区隔离、旧会话与投影缓存升级迁移、API Key 脱敏回显。
 
 ## 功能 / Features
 
