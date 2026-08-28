@@ -85,6 +85,59 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         /** JBCefJSQuery 回传里标记"来自 dsh 弹窗的 API Key"的前缀（与一键发送结果区分）。 */
         const val APIKEY_PREFIX = "__apikey__"
 
+        /**
+         * CodeBuddy 风格的高密度紧凑工作区 CSS（注入到 dsh web 页面）：
+         * 把代码块、行内代码、文件链接 / 产物胶囊、消息正文与列表整体收紧，
+         * 适应 IDE 工具窗的窄视口。
+         */
+        private const val COMPACT_WORKSPACE_CSS =
+            "/* 1) Markdown 代码块 (pre / .md-code-block) 紧凑化 */\n" +
+            "pre, :where(pre), [class*='block_'] :where(pre), .md-code-block pre, pre[class*='shiki'] {\n" +
+            "  font-family: var(--ds-font-family-code, 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace) !important;\n" +
+            "  font-size: 12.5px !important;\n" +
+            "  line-height: 1.45 !important;\n" +
+            "  padding: 10px 12px !important;\n" +
+            "  margin: 8px 0 !important;\n" +
+            "  border-radius: 8px !important;\n" +
+            "  letter-spacing: -0.01em;\n" +
+            "}\n" +
+            "pre code, :where(pre) code { font-size: 12.5px !important; line-height: 1.45 !important; font-family: inherit !important; }\n" +
+            "/* 2) Markdown 行内代码 精致胶囊 */\n" +
+            ":not(pre) > code, p code, li code {\n" +
+            "  font-family: var(--ds-font-family-code, 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace) !important;\n" +
+            "  font-size: 11.5px !important;\n" +
+            "  line-height: 1.35 !important;\n" +
+            "  padding: 1.5px 5px !important;\n" +
+            "  margin: 0 2px !important;\n" +
+            "  border-radius: 4px !important;\n" +
+            "  word-break: break-all;\n" +
+            "}\n" +
+            "/* 3) 文件链接 / 产物胶囊 紧凑化（避免被撑成大块卡片） */\n" +
+            "[class*='fileMention'], [class*='fileHeader'], [class*='filePill'], [class*='pill_'],\n" +
+            "[data-produced-files-row] button, button[class*='file_'] {\n" +
+            "  font-size: 11.5px !important;\n" +
+            "  line-height: 16px !important;\n" +
+            "  padding: 2px 7px !important;\n" +
+            "  height: auto !important;\n" +
+            "  min-height: 22px !important;\n" +
+            "  border-radius: 5px !important;\n" +
+            "  gap: 4px !important;\n" +
+            "}\n" +
+            "[class*='filePath'], [class*='path_'] { font-size: 12px !important; line-height: 16px !important; font-weight: 500 !important; }\n" +
+            "/* 4) 代码块顶部工具条 (Copy / 语言) 紧凑化 */\n" +
+            "[class*='copyButton_'], [class*='action_178r4'], [class*='header_178r4'] {\n" +
+            "  font-size: 11.5px !important;\n" +
+            "  padding: 2px 6px !important;\n" +
+            "}\n" +
+            "/* 5) 消息正文 / 列表 / 标题 紧凑化 */\n" +
+            "[class*='markdown_'] { font-size: 13.5px !important; line-height: 1.55 !important; }\n" +
+            "[class*='markdown_'] p { margin: 6px 0 !important; }\n" +
+            "[class*='markdown_'] ul, [class*='markdown_'] ol { margin: 4px 0 6px 0 !important; padding-left: 20px !important; }\n" +
+            "[class*='markdown_'] li { margin: 2px 0 !important; }\n" +
+            "[class*='markdown_'] h1 { font-size: 16px !important; margin: 12px 0 6px !important; }\n" +
+            "[class*='markdown_'] h2 { font-size: 15px !important; margin: 10px 0 5px !important; }\n" +
+            "[class*='markdown_'] h3, [class*='markdown_'] h4 { font-size: 14px !important; margin: 8px 0 4px !important; }\n"
+
         /** 通过工具窗口主 content（index 0）查找当前项目的面板（SendSelectionAction/SendLogExplanationAction 共用）。 */
         fun find(project: Project): DshToolWindowPanel? {
             val tw = com.intellij.openapi.wm.ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)
@@ -537,9 +590,9 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         }
     }
 
-    /** 注册 CEF load handler：主 frame 加载完成后注入前端辅助脚本（内测声明点掉 + API Key 捕获）。
-     *  侧栏图标缩放 CSS 已移除：默认集成的 dsh-mobile-hanui 在窄视口把侧栏变抽屉 + FAB，
-     *  聊天区占满全宽，不再需要单独缩小侧栏图标。 */
+    /** 注册 CEF load handler：主 frame 加载完成后注入前端辅助脚本（内测声明点掉 + API Key 捕获
+     *  + CodeBuddy 高密度紧凑工作区样式）。dsh-mobile-hanui 在窄视口负责侧栏→抽屉 + FAB 的改造，
+     *  这里负责聊天/代码块/文件胶囊的紧凑化（独立注入，不依赖 dsh 加载任何 client plugin）。 */
     private fun installLoadHandler(b: JBCefBrowser) {
         try {
             b.getJBCefClient().addLoadHandler(object : CefLoadHandlerAdapter() {
@@ -549,6 +602,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
                     // 注入是幂等的（先移除旧 style 再 append 新 style），每次都补一次最稳。
                     ApplicationManager.getApplication().invokeLater {
                         runCatching {
+                            executeInPage(buildCompactWorkspaceScript())
                             executeInPage(buildDismissNoticeScript())
                             val fn = jsQuery?.getFuncName()
                             if (fn != null) executeInPage(buildCaptureApiKeyScript(fn))
@@ -560,6 +614,41 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         } catch (e: Throwable) {
             LOG.warn("failed to install JCEF load handler", e)
         }
+    }
+
+    /**
+     * 构建"CodeBuddy 风格高密度紧凑工作区"注入脚本（幂等；每次 onLoadEnd 重补）。
+     *
+     * 思路：把 dsh web 的以下元素收紧到 IDE 工具窗内合适密度：
+     *   1) Markdown 代码块 (pre / .md-code-block) — 字号 12.5px / 行高 1.45 / padding 10px 12px
+     *   2) 行内代码 (inline code) — 字号 11.5px / 精致胶囊
+     *   3) 文件链接 / 产物胶囊 (fileMention / pill / deliverables / file pill) — 紧凑小胶囊，避免被撑成大块卡片
+     *   4) 消息正文与列表 (markdown_*) — 标题/段落/列表间距整体收紧
+     *   5) 代码块顶部工具条 (Copy 按钮 / 语言标识) — 字号缩小
+     *
+     * 不影响 dsh-mobile-hanui 的抽屉/FAB 行为；范围限定在工作区与消息流内的"信息密度"问题。
+     */
+    private fun buildCompactWorkspaceScript(): String {
+        val css = COMPACT_WORKSPACE_CSS
+        // 把 \n 转成 \n 转义序列内嵌到 JS 字符串里，避免 Kotlin raw string 的换行污染 JS 语法。
+        // 写入 <style> 标签；tag id 固定，先移除旧 tag 保证幂等；localStorage?mobileShell=0 时跳过。
+        return """
+        (() => {
+          if (window.location.search.indexOf('mobileShell=0') >= 0) return;
+          if (localStorage.getItem('dsh-idea-compact-workspace') === '0') return;
+          const STYLE_ID = 'dsh-idea-compact-workspace-v1';
+          const head = document.head || document.documentElement;
+          if (!head) return;
+          const old = document.getElementById(STYLE_ID);
+          if (old) old.remove();
+          const s = document.createElement('style');
+          s.id = STYLE_ID;
+          s.type = 'text/css';
+          s.appendChild(document.createTextNode(`__CSS__`));
+          head.appendChild(s);
+        })();
+        """.trimIndent()
+            .replace("__CSS__", css)
     }
 
     /**
