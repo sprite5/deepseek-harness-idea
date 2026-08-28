@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * Step 3 集成冒烟：mock IDE Bridge + mcp-ide-server.mjs + dsh web（failOnStartupError patch）。
  *
  * 验证链路（见 docs/DESIGN.md §7.2）：
- * 1. MCP server 的 tools/list 返回 6 个 ide_* 工具；
+ * 1. MCP server 的 tools/list 返回 7 个 ide_* 工具；
  * 2. tools/call 经 mock bridge 返回结构化结果；
  * 3. dsh web 带 --patch ide.yml 启动（failOnStartupError=true：连接/同步失败即拒绝启动）。
  *
@@ -104,6 +104,7 @@ class DshMcpBridgeSmokeTest {
                 "/sent-selection" -> """{"id":"s1","filePath":"C:/smoke/Main.kt","selection":"val x = 1","ts":123}"""
                 "/open-file" -> """{"ok":true}"""
                 "/reveal" -> """{"ok":true}"""
+                "/refresh" -> """{"ok":true,"refreshed":["C:/smoke"],"missing":[]}"""
                 else -> """{"error":"nf","code":"not_found"}"""
             }
             val body = resp.toByteArray(StandardCharsets.UTF_8)
@@ -144,20 +145,22 @@ class DshMcpBridgeSmokeTest {
         val mcpPort = waitForPortLine(mcpProc, home)
         assertTrue(mcpPort > 0, "mcp-ide-server did not report a port")
 
-        // 4) initialize + tools/list：6 个 ide_* 工具
+        // 4) initialize + tools/list：7 个 ide_* 工具
         val toolsText = rpc(mcpPort, "tools/list", emptyMap())
         val toolNames = Regex(""""name":"(ide_[a-z_]+)"""").findAll(toolsText).map { it.groupValues[1] }.toList()
         assertEquals(
             listOf("ide_get_selection", "ide_get_open_files", "ide_get_project_tree",
-                "ide_get_sent_selection", "ide_open_file", "ide_reveal_file"),
+                "ide_get_sent_selection", "ide_open_file", "ide_reveal_file", "ide_refresh_files"),
             toolNames,
-            "tools/list should expose exactly the 6 ide_* tools"
+            "tools/list should expose exactly the 7 ide_* tools"
         )
 
         // 5) tools/call 经 bridge 返回结构化结果（selection 无选中时为空字符串）
         val selText = rpc(mcpPort, "tools/call", mapOf("name" to "ide_get_selection", "arguments" to emptyMap<String, Any>()))
         assertTrue(selText.contains("Main.kt"), "tools/call ide_get_selection should return bridge data; got: $selText")
         assertTrue(hits.get() >= 1, "bridge should have been hit by tools/call")
+        val refreshText = rpc(mcpPort, "tools/call", mapOf("name" to "ide_refresh_files", "arguments" to emptyMap<String, Any>()))
+        assertTrue(refreshText.contains("refreshed"), "tools/call ide_refresh_files should return bridge data; got: $refreshText")
 
         // 6) dsh web 带 failOnStartupError patch 启动：连接失败会拒绝启动，故能起来即证明 MCP 链路通
         val patch = McpPatchGenerator.generateStrict(mcpPort)

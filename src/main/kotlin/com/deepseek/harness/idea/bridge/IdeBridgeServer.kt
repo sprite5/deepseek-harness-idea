@@ -14,10 +14,12 @@ import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
+import java.io.File
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
@@ -77,6 +79,7 @@ class IdeBridgeServer(
                 exchange.requestMethod == "POST" && path == "/sent-selection" -> postSentSelection(exchange)
                 exchange.requestMethod == "POST" && path == "/open-file" -> openFile(exchange)
                 exchange.requestMethod == "POST" && path == "/reveal" -> reveal(exchange)
+                exchange.requestMethod == "POST" && path == "/refresh" -> refresh(exchange)
                 else -> json(exchange, 404, mapOf("error" to "not found", "code" to "not_found"))
             }
         } catch (e: Exception) {
@@ -182,11 +185,14 @@ class IdeBridgeServer(
             json(exchange, 400, mapOf("error" to "path required", "code" to "bad_request"))
             return
         }
+        var found = false
         ApplicationManager.getApplication().invokeAndWait {
-            val vf = LocalFileSystem.getInstance().findFileByPath(path)
+            val vf = refreshPath(path)
+            found = vf != null
             if (vf != null) FileEditorManager.getInstance(project).openFile(vf, true)
         }
-        json(exchange, 200, mapOf("ok" to true, "path" to path))
+        if (found) json(exchange, 200, mapOf("ok" to true, "path" to path))
+        else json(exchange, 404, mapOf("ok" to false, "error" to "file not found", "code" to "file_not_found", "path" to path))
     }
 
     private fun reveal(exchange: HttpExchange) {
@@ -196,14 +202,49 @@ class IdeBridgeServer(
             json(exchange, 400, mapOf("error" to "path required", "code" to "bad_request"))
             return
         }
+        var found = false
         ApplicationManager.getApplication().invokeAndWait {
-            val vf = LocalFileSystem.getInstance().findFileByPath(path)
+            val vf = refreshPath(path)
+            found = vf != null
             if (vf != null) FileEditorManager.getInstance(project).openFile(vf, true)
         }
-        json(exchange, 200, mapOf("ok" to true, "path" to path))
+        if (found) json(exchange, 200, mapOf("ok" to true, "path" to path))
+        else json(exchange, 404, mapOf("ok" to false, "error" to "file not found", "code" to "file_not_found", "path" to path))
+    }
+
+    private fun refresh(exchange: HttpExchange) {
+        val body = readBody(exchange)
+        val requested = (body["paths"] as? List<*>)?.filterIsInstance<String>()?.filter { it.isNotBlank() } ?: emptyList()
+        val paths = if (requested.isEmpty()) listOfNotNull(project.basePath) else requested
+        val refreshed = mutableListOf<String>()
+        val missing = mutableListOf<String>()
+        ApplicationManager.getApplication().invokeAndWait {
+            for (path in paths) {
+                if (!isProjectPath(path)) {
+                    missing += path
+                    continue
+                }
+                if (refreshPath(path) != null) refreshed += path else missing += path
+            }
+        }
+        json(exchange, 200, mapOf("ok" to true, "refreshed" to refreshed, "missing" to missing))
     }
 
     // ---- 辅助 ----
+
+    /** 同步刷新磁盘路径对应的 VFS 文件/目录，必须在 EDT 执行。 */
+    private fun refreshPath(path: String): VirtualFile? {
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByPath(path) ?: return null
+        VfsUtil.markDirtyAndRefresh(false, vf.isDirectory, true, vf)
+        return vf
+    }
+
+    private fun isProjectPath(path: String): Boolean = try {
+        val base = project.basePath ?: return false
+        File(path).canonicalFile.toPath().startsWith(File(base).canonicalFile.toPath())
+    } catch (_: IOException) {
+        false
+    }
 
     /** 当前活动编辑器（选中的文件编辑器；仅 TextEditor 有 Editor 句柄）。 */
     private fun currentEditor(): Editor? {
