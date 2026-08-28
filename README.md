@@ -10,11 +10,11 @@
 
 - 感谢 **[dsh-mobile-hanui](https://github.com/Z-6354/dsh-mobile-hanui)**（MIT）：窄视口下把侧栏/详情
   面板变成抽屉 + 悬浮菜单按钮，内嵌工具窗里菜单不再挤占编辑空间。本插件已默认内置（源码直接打入插件）。
-- 感谢原作者 **[fieJiangW/deepseek-harness-idea](https://github.com/fieJiangW/deepseek-harness-idea)**
+- 感谢原作者 **[tieJiangW/deepseek-harness-idea](https://github.com/tieJiangW/deepseek-harness-idea/)**
   （MIT）：本仓库 fork 自其开源版本，内嵌运行时、MCP 桥接、快照审查等核心能力源自该项目。
 
 > **不再跟随上游 / No longer following upstream**：本仓库 fork 后已独立演进，**不再跟随
-> `fieJiangW/deepseek-harness-idea` 的更新**，也不承诺与其保持一致。
+> `tieJiangW/deepseek-harness-idea` 的更新**，也不承诺与其保持一致。
 
 ## 与上游的差异 / Differences from upstream
 

@@ -677,7 +677,114 @@ window.__ModuleLoader__.load({
   html.${HTML_CLASS} .${INPUT.input},
   html.${HTML_CLASS} textarea,
   html.${HTML_CLASS} input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
+    font-size: 14px !important;
+  }
+
+  /* ==========================================================================
+     IDE Compact Workspace / CodeBuddy-like High Density Styles
+     ========================================================================== */
+
+  /* 1. Markdown 代码块 (pre / code) 高密度紧凑优化 */
+  html.${HTML_CLASS} pre,
+  html.${HTML_CLASS} :where(pre),
+  html.${HTML_CLASS} [class*="block_"] :where(pre),
+  html.${HTML_CLASS} .md-code-block pre,
+  html.${HTML_CLASS} pre[class*="shiki"] {
+    font-family: var(--ds-font-family-code, "JetBrains Mono", "SF Mono", Consolas, Menlo, monospace) !important;
+    font-size: 12.5px !important;
+    line-height: 1.45 !important;
+    padding: 10px 12px !important;
+    margin: 8px 0 !important;
+    border-radius: 8px !important;
+    letter-spacing: -0.01em;
+  }
+
+  html.${HTML_CLASS} pre code,
+  html.${HTML_CLASS} :where(pre) code {
+    font-size: 12.5px !important;
+    line-height: 1.45 !important;
+    font-family: inherit !important;
+  }
+
+  /* 2. Markdown 行内代码 (Inline Code) 精致小胶囊 */
+  html.${HTML_CLASS} :not(pre) > code,
+  html.${HTML_CLASS} p code,
+  html.${HTML_CLASS} li code {
+    font-family: var(--ds-font-family-code, "JetBrains Mono", "SF Mono", Consolas, Menlo, monospace) !important;
+    font-size: 11.5px !important;
+    line-height: 1.35 !important;
+    padding: 1.5px 5px !important;
+    margin: 0 2px !important;
+    border-radius: 4px !important;
+    background: var(--dsw-alias-markdown-inline-code, rgba(125, 125, 125, 0.12)) !important;
+    word-break: break-all;
+    vertical-align: baseline;
+  }
+
+  /* 3. 文件链接胶囊 / 文件引用 / 产物列表 (File References / Deliverables / File Mentions) 紧凑化 */
+  html.${HTML_CLASS} [class*="fileMention"],
+  html.${HTML_CLASS} [class*="fileHeader"],
+  html.${HTML_CLASS} [class*="filePill"],
+  html.${HTML_CLASS} [class*="pill_"],
+  html.${HTML_CLASS} [data-produced-files-row] button,
+  html.${HTML_CLASS} button[class*="file_"] {
+    font-size: 11.5px !important;
+    line-height: 16px !important;
+    padding: 2px 7px !important;
+    height: auto !important;
+    min-height: 22px !important;
+    border-radius: 5px !important;
+    gap: 4px !important;
+  }
+
+  /* 文件路径单行省略或自然折行，避免大块臃肿卡片 */
+  html.${HTML_CLASS} [class*="filePath"],
+  html.${HTML_CLASS} [class*="path_"] {
+    font-size: 12px !important;
+    line-height: 16px !important;
+    font-weight: 500 !important;
+  }
+
+  /* 4. 代码块顶部工具条 (语言 / Copy 按钮) 紧凑化 */
+  html.${HTML_CLASS} [class*="copyButton_"],
+  html.${HTML_CLASS} [class*="action_178r4"],
+  html.${HTML_CLASS} [class*="header_178r4"] {
+    font-size: 11.5px !important;
+    padding: 2px 6px !important;
+  }
+
+  /* 5. 消息气泡正文排版与列表间距紧凑化 */
+  html.${HTML_CLASS} [class*="markdown_"] {
+    font-size: 13.5px !important;
+    line-height: 1.55 !important;
+  }
+
+  html.${HTML_CLASS} [class*="markdown_"] p {
+    margin: 6px 0 !important;
+  }
+
+  html.${HTML_CLASS} [class*="markdown_"] ul,
+  html.${HTML_CLASS} [class*="markdown_"] ol {
+    margin: 4px 0 6px 0 !important;
+    padding-left: 20px !important;
+  }
+
+  html.${HTML_CLASS} [class*="markdown_"] li {
+    margin: 2px 0 !important;
+  }
+
+  html.${HTML_CLASS} [class*="markdown_"] h1 {
     font-size: 16px !important;
+    margin: 12px 0 6px !important;
+  }
+  html.${HTML_CLASS} [class*="markdown_"] h2 {
+    font-size: 15px !important;
+    margin: 10px 0 5px !important;
+  }
+  html.${HTML_CLASS} [class*="markdown_"] h3,
+  html.${HTML_CLASS} [class*="markdown_"] h4 {
+    font-size: 14px !important;
+    margin: 8px 0 4px !important;
   }
 }
 
