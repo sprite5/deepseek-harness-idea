@@ -10,7 +10,7 @@ plugins {
 }
 
 group = "com.deepseek.harness"
-version = "0.1.4"
+version = "0.1.5"
 
 repositories {
     mavenCentral()
@@ -106,7 +106,10 @@ tasks {
     register("bundleRuntime", Copy::class) {
         description = "Package the built runtime as runtime-bundle.zip into plugin resources"
         group = "build"
-        dependsOn("buildRuntime")
+        // 若已有 build/runtime-bundle.zip，直接复用既有离线包，避免每次全量 buildRuntime 联网
+        if (!rootProject.file("build/runtime-bundle.zip").exists()) {
+            dependsOn("buildRuntime")
+        }
         val bundle = rootProject.file("build/runtime-bundle.zip")
         val dest = rootProject.layout.buildDirectory.dir("plugin-runtime")
         inputs.file(bundle)

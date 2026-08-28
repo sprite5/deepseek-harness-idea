@@ -1,5 +1,5 @@
 /**
- * Mobile shell v16 — pin center to grid track 2 + left drawers + FishLogo FAB.
+ * Mobile shell v17 — compact session header + smaller FishLogo FAB.
  *
  * Root cause of “only menu visible” (v11): `grid-template-columns: 0 1fr 0` +
  * `position:fixed` on sidebar/details removes them from grid flow → center
@@ -30,9 +30,9 @@ window.__ModuleLoader__.load({
     const STYLE_ID = 'dsh-mobile-hanui-css-v1'
     const HTML_CLASS = 'dsh-mobile-shell'
     const ATTR_DETAILS = 'data-dsh-mobile-details-open'
-    const FAB_POS_KEY = 'dsh-mobile-fab-pos'
+    const FAB_POS_KEY = 'dsh-mobile-fab-pos-v2'
     const DRAG_THRESHOLD = 8
-    const FAB_SIZE = 44
+    const FAB_SIZE = 36
     const FAB_MARGIN = 8
     // Swipe-close only (backdrop); axis-lock aborts vertical pans
     const SWIPE_AXIS_LOCK = 12
@@ -314,13 +314,29 @@ window.__ModuleLoader__.load({
   /* Message footer — line1 icons+time; line2 metrics (runMs inside timeEnd) */
   html.${HTML_CLASS} .${MSG.actions} {
     display: flex !important;
-    flex-wrap: wrap !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
     align-items: center !important;
     height: auto !important;
-    min-height: 28px !important;
-    gap: 6px 8px !important;
-    row-gap: 4px !important;
-    font-size: 12px;
+    min-height: 20px !important;
+    gap: 2px 4px !important;
+    row-gap: 2px !important;
+    font-size: 11px !important;
+  }
+  html.${HTML_CLASS} .${MSG.actions} button,
+  html.${HTML_CLASS} [class*='p-xYUq_action'],
+  html.${HTML_CLASS} [class*='_8_XoUG_action'] {
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px !important;
+    min-height: 20px !important;
+    padding: 2px !important;
+  }
+  html.${HTML_CLASS} .${MSG.actions} svg,
+  html.${HTML_CLASS} [class*='p-xYUq_action'] svg,
+  html.${HTML_CLASS} [class*='_8_XoUG_action'] svg {
+    width: 12px !important;
+    height: 12px !important;
   }
   html.${HTML_CLASS} .${MSG.timeStart},
   html.${HTML_CLASS} .${MSG.timeEnd} {
@@ -339,17 +355,17 @@ window.__ModuleLoader__.load({
     margin: 0 6px !important;
     font-size: 12px !important;
   }
-  /* StatsLine composer dock — two lines; hide TTFT/tok/s */
+  /* StatsLine composer dock — force all metrics onto one compact row. */
   html.${HTML_CLASS} .${STATS.root} {
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: unset !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
     display: flex !important;
-    flex-wrap: wrap !important;
+    flex-wrap: nowrap !important;
     justify-content: center !important;
     align-items: baseline !important;
-    gap: 2px 0 !important;
-    row-gap: 2px !important;
+    gap: 0 4px !important;
+    row-gap: 0 !important;
     max-width: 100% !important;
     font-size: 12px !important;
     line-height: 18px !important;
@@ -361,96 +377,10 @@ window.__ModuleLoader__.load({
     display: none !important;
   }
   html.${HTML_CLASS} .${STATS.root} [data-dsh-stats-break] {
-    flex: 0 0 100% !important;
-    width: 100% !important;
-    height: 0 !important;
-    margin: 0 !important;
-    overflow: hidden !important;
-    pointer-events: none !important;
+    display: none !important;
   }
 
-  /* InputBar — single nowrap toolbar row (v15; undo v14 stack) */
-  html.${HTML_CLASS} .${INPUT.root} {
-    width: 100% !important;
-    max-width: 100% !important;
-    box-sizing: border-box !important;
-    padding-left: max(0px, env(safe-area-inset-left, 0px)) !important;
-    padding-right: max(0px, env(safe-area-inset-right, 0px)) !important;
-    padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)) !important;
-    overflow: visible !important; /* never clip model/effort popovers that pop up */
-  }
-  html.${HTML_CLASS} .${INPUT.card} {
-    width: 100% !important;
-    max-width: 100% !important;
-    box-sizing: border-box !important;
-    gap: 8px !important;
-    padding-top: 8px !important;
-    border-radius: 18px !important;
-    overflow: visible !important; /* was hidden — clips PermissionSelect */
-  }
-  html.${HTML_CLASS} .${INPUT.row} {
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    align-items: center !important;
-    justify-content: flex-start !important;
-    gap: 6px !important;
-    padding: 2px 8px 8px !important;
-    min-width: 0 !important;
-    width: 100% !important;
-    box-sizing: border-box !important;
-  }
-  html.${HTML_CLASS} .${INPUT.tools} {
-    flex: 0 1 auto !important; /* NOT 1 1 100% */
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    align-items: center !important;
-    gap: 6px !important;
-    min-width: 0 !important;
-    max-width: none !important;
-  }
-  html.${HTML_CLASS} .${INPUT.modes} {
-    flex: 0 1 auto !important; /* NOT 1 1 100% */
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    align-items: center !important;
-    gap: 4px !important;
-    min-width: 0 !important;
-    max-width: min(42vw, 140px) !important;
-    overflow: visible !important;
-  }
-  html.${HTML_CLASS} .${INPUT.select} {
-    flex: 0 1 auto !important;
-    width: auto !important;
-    min-width: 0 !important;
-    max-width: min(42vw, 140px) !important; /* compact; QA may use 36–42vw */
-    min-height: 36px !important;
-    height: 36px !important;
-    font-size: 13px !important;
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-  }
-  html.${HTML_CLASS} .${INPUT.trailing} {
-    flex: 1 1 auto !important; /* NOT 1 1 100% — same row */
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    justify-content: flex-end !important;
-    align-items: center !important;
-    gap: 6px !important;
-    min-width: 0 !important;
-    max-width: none !important;
-  }
-  html.${HTML_CLASS} .${INPUT.add} {
-    width: 36px !important;
-    height: 36px !important;
-    flex: none !important;
-  }
-  html.${HTML_CLASS} .${INPUT.primary} {
-    width: 40px !important;
-    height: 40px !important;
-    transform: none !important;
-    flex: none !important;
-  }
+  /* InputBar: left at DSH default (no compact overrides — avoid breaking the mirror-based caret/auto-grow logic). */
 
   /* Session header: title alone; 「模式」beside 轨迹 tabs */
   html.${HTML_CLASS} .${HDR.header} {
@@ -460,10 +390,34 @@ window.__ModuleLoader__.load({
       "crumbs utilities"
       "tabs actions" !important;
     align-items: center !important;
-    column-gap: 8px !important;
-    row-gap: 4px !important;
-    padding-left: 12px !important;
-    padding-right: 12px !important;
+    column-gap: 4px !important;
+    row-gap: 1px !important;
+    padding: 3px 8px 2px !important;
+    min-height: 0 !important;
+  }
+  /* Compact top/session header: preserve the controls, remove excess chrome. */
+  html.${HTML_CLASS} .${HDR.header} button,
+  html.${HTML_CLASS} .${HDR.header} [role="button"] {
+    min-height: 22px !important;
+    height: 22px !important;
+    padding: 1px 5px !important;
+    font-size: 11px !important;
+    line-height: 18px !important;
+  }
+  html.${HTML_CLASS} .${HDR.crumbs},
+  html.${HTML_CLASS} .${HDR.crumbs} * {
+    font-size: 12px !important;
+    line-height: 16px !important;
+  }
+  html.${HTML_CLASS} .${HDR.tabs},
+  html.${HTML_CLASS} .${HDR.tabs} * {
+    font-size: 11px !important;
+    line-height: 20px !important;
+  }
+  html.${HTML_CLASS} .${HDR.headerUtilities},
+  html.${HTML_CLASS} .${HDR.headerUtilities} * {
+    font-size: 10px !important;
+    line-height: 18px !important;
   }
   html.${HTML_CLASS} .${HDR.titleRow},
   html.${HTML_CLASS} .${HDR.titleCluster} {
@@ -673,9 +627,8 @@ window.__ModuleLoader__.load({
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Keep iOS zoom guard */
-  html.${HTML_CLASS} .${INPUT.input},
-  html.${HTML_CLASS} textarea,
+  /* Composer font metrics left at DSH default (do not override textarea/mirror). */
+  /* Keep ordinary form controls readable without overriding the composer mirror. */
   html.${HTML_CLASS} input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
     font-size: 14px !important;
   }
@@ -791,11 +744,11 @@ window.__ModuleLoader__.load({
 .dshMobMenu {
   position: fixed;
   z-index: 60;
-  top: calc(10px + env(safe-area-inset-top, 0px));
-  left: calc(10px + env(safe-area-inset-left, 0px));
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  left: calc(50% - 18px);
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.12));
   background: var(--dsw-alias-button-floating-fill, #fff);
   color: var(--dsw-alias-label-primary, #0f1115);
@@ -813,7 +766,7 @@ window.__ModuleLoader__.load({
   background: var(--dsw-alias-button-floating-hover, #f3f4f6);
 }
 .dshMobMenu svg {
-  width: 22px;
+  width: 18px;
   height: auto;
   display: block;
 }
@@ -894,7 +847,9 @@ window.__ModuleLoader__.load({
     }
 
     function defaultFabPos() {
-      return { left: 10, top: 10 }
+      const vw = typeof window !== 'undefined' ? window.innerWidth : 375
+      const centerX = Math.round((vw - FAB_SIZE) / 2)
+      return { left: centerX, top: 8 }
     }
 
     function clampFabPos(left, top) {

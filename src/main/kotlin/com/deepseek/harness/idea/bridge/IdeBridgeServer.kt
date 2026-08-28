@@ -65,7 +65,18 @@ class IdeBridgeServer(
 
     override fun handle(exchange: HttpExchange) {
         try {
-            if (!constantTimeEquals(exchange.requestHeaders.getFirst("X-DSH-IDE-Token"), token)) {
+            LOG.info("IDE bridge request: method=" + exchange.requestMethod + ", path=" + exchange.requestURI + ", origin=" + (exchange.requestHeaders.getFirst("Origin") ?: "none"))
+            exchange.responseHeaders.set("Access-Control-Allow-Origin", "*")
+            exchange.responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            exchange.responseHeaders.set("Access-Control-Allow-Headers", "Content-Type, X-DSH-IDE-Token")
+            if (exchange.requestMethod == "OPTIONS") {
+                exchange.sendResponseHeaders(204, -1)
+                return
+            }
+            val queryToken = exchange.requestURI.rawQuery?.split("&")?.firstOrNull { it.startsWith("token=") }?.substringAfter("token=")
+            val authenticated = constantTimeEquals(exchange.requestHeaders.getFirst("X-DSH-IDE-Token") ?: queryToken, token)
+            LOG.info("IDE bridge auth=" + authenticated + ", tokenSource=" + if (exchange.requestHeaders.getFirst("X-DSH-IDE-Token") != null) "header" else "query")
+            if (!authenticated) {
                 json(exchange, 401, mapOf("error" to "unauthorized", "code" to "unauthorized"))
                 return
             }
@@ -181,6 +192,7 @@ class IdeBridgeServer(
     private fun openFile(exchange: HttpExchange) {
         val body = readBody(exchange)
         val path = body["path"] as? String
+        LOG.info("IDE bridge /open-file path=" + path)
         if (path.isNullOrBlank()) {
             json(exchange, 400, mapOf("error" to "path required", "code" to "bad_request"))
             return
@@ -189,7 +201,11 @@ class IdeBridgeServer(
         ApplicationManager.getApplication().invokeAndWait {
             val vf = refreshPath(path)
             found = vf != null
-            if (vf != null) FileEditorManager.getInstance(project).openFile(vf, true)
+            LOG.info("IDE bridge /open-file resolved=" + (vf?.path ?: "NOT_FOUND"))
+            if (vf != null) {
+                val editors = FileEditorManager.getInstance(project).openFile(vf, true)
+                LOG.info("IDE bridge /open-file openFile called, editors=" + editors.size)
+            }
         }
         if (found) json(exchange, 200, mapOf("ok" to true, "path" to path))
         else json(exchange, 404, mapOf("ok" to false, "error" to "file not found", "code" to "file_not_found", "path" to path))
@@ -234,7 +250,15 @@ class IdeBridgeServer(
 
     /** 同步刷新磁盘路径对应的 VFS 文件/目录，必须在 EDT 执行。 */
     private fun refreshPath(path: String): VirtualFile? {
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByPath(path) ?: return null
+        val normalized = path.replace('\\', '/')
+        val candidates = buildList {
+            add(normalized)
+            val base = project.basePath?.replace('\\', '/')
+            if (!File(normalized).isAbsolute && !base.isNullOrBlank()) add("$base/${normalized.trimStart('/')}")
+        }
+        val vf = candidates.asSequence()
+            .mapNotNull { LocalFileSystem.getInstance().refreshAndFindFileByPath(it) }
+            .firstOrNull() ?: return null
         VfsUtil.markDirtyAndRefresh(false, vf.isDirectory, true, vf)
         return vf
     }

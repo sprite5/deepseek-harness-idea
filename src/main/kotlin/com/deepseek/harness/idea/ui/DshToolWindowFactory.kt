@@ -20,6 +20,8 @@ import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefBrowserBase
 import com.intellij.ui.jcef.JBCefJSQuery
+import org.cef.handler.CefRequestHandlerAdapter
+import org.cef.network.CefRequest
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.CardLayout
@@ -84,59 +86,179 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
 
         /** JBCefJSQuery 回传里标记"来自 dsh 弹窗的 API Key"的前缀（与一键发送结果区分）。 */
         const val APIKEY_PREFIX = "__apikey__"
+        /** JBCefJSQuery 回传里标记"拦截到文件点击，需在 IDEA 编辑器中打开"的前缀。 */
+        const val OPEN_FILE_PREFIX = "__openfile__"
 
         /**
-         * CodeBuddy 风格的高密度紧凑工作区 CSS（注入到 dsh web 页面）：
+         * CodeBuddy 风格的高密度紧凑工作区 CSS（注入到 dsh web 页面）。
          * 把代码块、行内代码、文件链接 / 产物胶囊、消息正文与列表整体收紧，
          * 适应 IDE 工具窗的窄视口。
+         *
+         * 选择器说明（DSH 0.1.1-rc.2 的 CSS Modules 哈希）：
+         *   代码块容器：<div class="<hash>_block_178r4_4 md-code-block">
+         *   代码块顶部：<div class="<hash>_header_178r4 ...">
+         *   代码块 pre：<pre class="<hash>_shiki_178r4_84 ...">
+         *   行内 code 容器：<p/li> 内嵌 code（受 markdown 样式影响）
+         *   文件链接：<a class="<hash>_fileMention_1r4m5_288">
+         *   文件胶囊（产物）：<button class="<hash>_file_<hash>">
+         *
+         * CSS 变量覆盖优先于 font-size 直接赋值（DSH 用 font: var(--xxx) shorthand 强制覆盖）：
+         *   --dsw-font-markdown-code-block 决定代码块字体/大小/行高。
+         *   --ds-font-family-code          决定代码字体族。
          */
         private const val COMPACT_WORKSPACE_CSS =
-            "/* 1) Markdown 代码块 (pre / .md-code-block) 紧凑化 */\n" +
-            "pre, :where(pre), [class*='block_'] :where(pre), .md-code-block pre, pre[class*='shiki'] {\n" +
-            "  font-family: var(--ds-font-family-code, 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace) !important;\n" +
-            "  font-size: 12.5px !important;\n" +
-            "  line-height: 1.45 !important;\n" +
-            "  padding: 10px 12px !important;\n" +
-            "  margin: 8px 0 !important;\n" +
-            "  border-radius: 8px !important;\n" +
-            "  letter-spacing: -0.01em;\n" +
+            "/* === CodeBuddy-like high-density workspace === */\n" +
+            "/* 1) 重写核心 CSS 变量 */\n" +
+            ":root {\n" +
+            "  --dsw-font-markdown-code-block: 11px/1.45 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace !important;\n" +
+            "  --dsl-code-block-content-font: 11px/1.45 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace !important;\n" +
+            "  --dsw-font-markdown-code: 11px/1.3 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace !important;\n" +
+            "  --dsw-font-markdown-code-block-small: 10.5px/1.3 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace !important;\n" +
             "}\n" +
-            "pre code, :where(pre) code { font-size: 12.5px !important; line-height: 1.45 !important; font-family: inherit !important; }\n" +
-            "/* 2) Markdown 行内代码 精致胶囊 */\n" +
-            ":not(pre) > code, p code, li code {\n" +
-            "  font-family: var(--ds-font-family-code, 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace) !important;\n" +
-            "  font-size: 11.5px !important;\n" +
-            "  line-height: 1.35 !important;\n" +
-            "  padding: 1.5px 5px !important;\n" +
-            "  margin: 0 2px !important;\n" +
-            "  border-radius: 4px !important;\n" +
-            "  word-break: break-all;\n" +
-            "}\n" +
-            "/* 3) 文件链接 / 产物胶囊 紧凑化（避免被撑成大块卡片） */\n" +
-            "[class*='fileMention'], [class*='fileHeader'], [class*='filePill'], [class*='pill_'],\n" +
-            "[data-produced-files-row] button, button[class*='file_'] {\n" +
-            "  font-size: 11.5px !important;\n" +
-            "  line-height: 16px !important;\n" +
-            "  padding: 2px 7px !important;\n" +
-            "  height: auto !important;\n" +
-            "  min-height: 22px !important;\n" +
-            "  border-radius: 5px !important;\n" +
+            "/* 2) 聊天流最外层间距彻底收紧（流项间距从 16px 压缩为 4px） */\n" +
+            "[class*='Md3f7G_column'], [data-chat-flow] {\n" +
             "  gap: 4px !important;\n" +
             "}\n" +
-            "[class*='filePath'], [class*='path_'] { font-size: 12px !important; line-height: 16px !important; font-weight: 500 !important; }\n" +
-            "/* 4) 代码块顶部工具条 (Copy / 语言) 紧凑化 */\n" +
-            "[class*='copyButton_'], [class*='action_178r4'], [class*='header_178r4'] {\n" +
-            "  font-size: 11.5px !important;\n" +
-            "  padding: 2px 6px !important;\n" +
+            "[class*='Md3f7G_flowItem'] {\n" +
+            "  margin: 0 !important;\n" +
             "}\n" +
-            "/* 5) 消息正文 / 列表 / 标题 紧凑化 */\n" +
-            "[class*='markdown_'] { font-size: 13.5px !important; line-height: 1.55 !important; }\n" +
-            "[class*='markdown_'] p { margin: 6px 0 !important; }\n" +
-            "[class*='markdown_'] ul, [class*='markdown_'] ol { margin: 4px 0 6px 0 !important; padding-left: 20px !important; }\n" +
-            "[class*='markdown_'] li { margin: 2px 0 !important; }\n" +
-            "[class*='markdown_'] h1 { font-size: 16px !important; margin: 12px 0 6px !important; }\n" +
-            "[class*='markdown_'] h2 { font-size: 15px !important; margin: 10px 0 5px !important; }\n" +
-            "[class*='markdown_'] h3, [class*='markdown_'] h4 { font-size: 14px !important; margin: 8px 0 4px !important; }\n"
+            "/* 3) 工具调用树与连续工具调用行 (Read / Grep / Edit / Bash 连续流) 行高与间距极致紧凑 */\n" +
+            "[class*='ztWv_q_callRow'], [class*='ztWv_q_subCalls'], [class*='callRow'] {\n" +
+            "  margin: 0 !important;\n" +
+            "  gap: 0 !important;\n" +
+            "}\n" +
+            "[class*='o3BgMG_root'], [class*='_root_9cl6j'] {\n" +
+            "  margin: 0 !important;\n" +
+            "  gap: 0 !important;\n" +
+            "}\n" +
+            "[class*='o3BgMG_row'], [class*='_row_9cl6j'] {\n" +
+            "  min-height: 18px !important;\n" +
+            "  height: 18px !important;\n" +
+            "  padding: 0 4px !important;\n" +
+            "  font-size: 11px !important;\n" +
+            "  line-height: 18px !important;\n" +
+            "  letter-spacing: -0.02em !important;\n" +
+            "}\n" +
+            "[class*='o3BgMG_fileLink'], [class*='_fileLink'] {\n" +
+            "  font-size: 11px !important;\n" +
+            "  line-height: 18px !important;\n" +
+            "  letter-spacing: -0.02em !important;\n" +
+            "}\n" +
+            "[class*='o3BgMG_summary'], [class*='_title_9cl6j'], [class*='_leading_9cl6j'] {\n" +
+            "  font-size: 11px !important;\n" +
+            "  line-height: 18px !important;\n" +
+            "  letter-spacing: -0.02em !important;\n" +
+            "}\n" +
+            "[class*='o3BgMG_sep'] {\n" +
+            "  margin: 0 4px !important;\n" +
+            "}\n" +
+            "/* 4) Markdown 代码块 (pre / code) 极致紧凑 */\n" +
+            ".md-code-block, [class*='block_'][class*='md-code-block'] {\n" +
+            "  padding: 0 !important;\n" +
+            "  margin: 3px 0 !important;\n" +
+            "  border-radius: 5px !important;\n" +
+            "}\n" +
+            ".md-code-block pre, [class*='md-code-block'] pre, pre[class*='shiki'], pre[class*='plain'], pre {\n" +
+            "  font-size: 11px !important;\n" +
+            "  line-height: 1.45 !important;\n" +
+            "  padding: 5px 8px !important;\n" +
+            "  margin: 0 !important;\n" +
+            "  border-radius: 5px !important;\n" +
+            "  font-family: 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace !important;\n" +
+            "  letter-spacing: -0.01em !important;\n" +
+            "  word-break: break-word !important;\n" +
+            "  white-space: pre !important;\n" +
+            "  overflow-x: auto !important;\n" +
+            "}\n" +
+            ".md-code-block pre code, [class*='md-code-block'] pre code, pre code {\n" +
+            "  font-size: 11px !important;\n" +
+            "  line-height: 1.45 !important;\n" +
+            "  font-family: inherit !important;\n" +
+            "  background: transparent !important;\n" +
+            "  padding: 0 !important;\n" +
+            "}\n" +
+            "/* 5) 代码块顶部工具条 (banner / Copy 按钮) */\n" +
+            "[class*='bannerWrap_'], [class*='banner_178r4'], [class*='infostring_'],\n" +
+            "[class*='action_178r4'], [class*='copyButton_'], [class*='header_178r4'] {\n" +
+            "  font-size: 10px !important;\n" +
+            "  line-height: 14px !important;\n" +
+            "  padding: 1px 5px !important;\n" +
+            "  min-height: 16px !important;\n" +
+            "}\n" +
+            "/* 6) 用户输入气泡 (User Bubble / Ref Chip) 保持易读字号，仅收紧 padding */\n" +
+            "[class*='gdEzaW_userRow'] {\n" +
+            "  gap: 4px !important;\n" +
+            "}\n" +
+            "[class*='gdEzaW_bubble'] {\n" +
+            "  padding: 8px 12px !important;\n" +
+            "  border-radius: 14px !important;\n" +
+            "  font-size: 13.5px !important;\n" +
+            "  line-height: 20px !important;\n" +
+            "  letter-spacing: 0 !important;\n" +
+            "}\n" +
+            "[class*='_text_1pfhk'] {\n" +
+            "  font-size: 13.5px !important;\n" +
+            "  line-height: 20px !important;\n" +
+            "  letter-spacing: 0 !important;\n" +
+            "}\n" +
+            "[class*='gdEzaW_refChip'] {\n" +
+            "  font-size: 12px !important;\n" +
+            "  padding: 1px 5px !important;\n" +
+            "  margin: 0 1px !important;\n" +
+            "  letter-spacing: 0 !important;\n" +
+            "}\n" +
+            "/* 7) 行内 code 与文件胶囊 */\n" +
+            ":not(pre) > code, p code, li code, [class*='markdown_'] :not(pre) > code {\n" +
+            "  font-family: 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace !important;\n" +
+            "  font-size: 10.5px !important;\n" +
+            "  line-height: 1.25 !important;\n" +
+            "  padding: 0 3px !important;\n" +
+            "  margin: 0 1px !important;\n" +
+            "  border-radius: 3px !important;\n" +
+            "  letter-spacing: -0.01em !important;\n" +
+            "}\n" +
+            "[class*='fileMention'], [class*='fileHeader'], [class*='filePill'],\n" +
+            "[class*='file_'], [class*='pill_'] {\n" +
+            "  font-size: 10.5px !important;\n" +
+            "  line-height: 13px !important;\n" +
+            "  padding: 0 4px !important;\n" +
+            "  min-height: 14px !important;\n" +
+            "  border-radius: 3px !important;\n" +
+            "  letter-spacing: -0.01em !important;\n" +
+            "}\n" +
+            "[class*='filePath'], [class*='path_'] {\n" +
+            "  font-size: 10.5px !important;\n" +
+            "  line-height: 13px !important;\n" +
+            "  letter-spacing: -0.01em !important;\n" +
+            "}\n" +
+            "/* 8) 消息正文与段落 / 列表收紧 */\n" +
+            "[class*='Sxvs8a_root'], [class*='Sxvs8a_body'] {\n" +
+            "  font-size: 11.5px !important;\n" +
+            "  line-height: 1.4 !important;\n" +
+            "  gap: 4px !important;\n" +
+            "}\n" +
+            "[class*='markdown_'] {\n" +
+            "  font-size: 11.5px !important;\n" +
+            "  line-height: 1.4 !important;\n" +
+            "  letter-spacing: -0.01em !important;\n" +
+            "}\n" +
+            "[class*='markdown_'] p { margin: 2px 0 !important; }\n" +
+            "[class*='markdown_'] ul, [class*='markdown_'] ol { margin: 1px 0 2px 0 !important; padding-left: 12px !important; }\n" +
+            "[class*='markdown_'] li { margin: 0 !important; }\n" +
+            "[class*='markdown_'] h1 { font-size: 13.5px !important; margin: 5px 0 2px !important; }\n" +
+            "[class*='markdown_'] h2 { font-size: 12.5px !important; margin: 4px 0 2px !important; }\n" +
+            "[class*='markdown_'] h3, [class*='markdown_'] h4 { font-size: 11.5px !important; margin: 3px 0 1px !important; }\n" +
+            "/* 9) 重试行 / 消息 footer / 性能行 */\n" +
+            "[class*='retryRow'], [class*='retrySummary'], [class*='retryText'], [class*='timeEnd'], [class*='timeStart'] {\n" +
+            "  font-size: 10px !important;\n" +
+            "  line-height: 13px !important;\n" +
+            "  letter-spacing: -0.01em !important;\n" +
+            "}\n" +
+            "[class*='p-xYUq_actions'] {\n" +
+            "  gap: 4px !important;\n" +
+            "  min-height: 18px !important;\n" +
+            "  height: auto !important;\n" +
+            "}\n"
 
         /** 通过工具窗口主 content（index 0）查找当前项目的面板（SendSelectionAction/SendLogExplanationAction 共用）。 */
         fun find(project: Project): DshToolWindowPanel? {
@@ -170,6 +292,10 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
 
     /** 自动发送在途守卫（防双击/连点重复提交）。 */
     private val sending = AtomicBoolean(false)
+
+    /** 周期性注入紧凑样式的备用定时器（onLoadEnd 错过 / SPA 路由切换时仍能生效）。 */
+    @Volatile
+    private var compactRetryTimer: javax.swing.Timer? = null
 
     /** dispose 幂等位（项目切换 content 先移除 + 项目关闭 Disposer 双路径）。 */
     private val disposed = AtomicBoolean(false)
@@ -295,6 +421,8 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         // Disposer 链可能再次调用；用原子位防重复销毁（重复杀进程/释放名额）。
         if (!disposed.compareAndSet(false, true)) return
         // processManager/bridgeManager 已注册到 Disposer(this)，此处显式停止保证顺序
+        compactRetryTimer?.stop()
+        compactRetryTimer = null
         processManager?.dispose()
         processManager = null
         bridgeManager?.dispose()
@@ -592,28 +720,71 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
 
     /** 注册 CEF load handler：主 frame 加载完成后注入前端辅助脚本（内测声明点掉 + API Key 捕获
      *  + CodeBuddy 高密度紧凑工作区样式）。dsh-mobile-hanui 在窄视口负责侧栏→抽屉 + FAB 的改造，
-     *  这里负责聊天/代码块/文件胶囊的紧凑化（独立注入，不依赖 dsh 加载任何 client plugin）。 */
+     *  这里负责聊天/代码块/文件胶囊的紧凑化（独立注入，不依赖 dsh 加载任何 client plugin）。
+     *
+     *  注入策略：onLoadEnd 触发时执行一次；onLoadEnd 不触发 / 失败不影响其他注入，
+     *  因此也加了一个备用轮询（每 2s）覆盖 SPA 路由切换与首次失败重试的场景。 */
     private fun installLoadHandler(b: JBCefBrowser) {
         try {
+            // 在 CEF 导航层拦截 file:// / 外部路径，避免落到 Windows 文件关联。
+            b.getJBCefClient().addRequestHandler(object : CefRequestHandlerAdapter() {
+                override fun onBeforeBrowse(cefBrowser: CefBrowser, frame: org.cef.browser.CefFrame, request: CefRequest, userGesture: Boolean, isRedirect: Boolean): Boolean {
+                    if (!frame.isMain) return false
+                    val url = request.url ?: return false
+                    if (url.startsWith("file:", ignoreCase = true)) {
+                        val raw = runCatching { java.net.URI(url).path }.getOrNull()
+                            ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+                        if (!raw.isNullOrBlank()) {
+                            ApplicationManager.getApplication().invokeLater { openFileInEditor(raw) }
+                            return true
+                        }
+                    }
+                    return false
+                }
+            }, b.cefBrowser)
             b.getJBCefClient().addLoadHandler(object : CefLoadHandlerAdapter() {
                 override fun onLoadEnd(cefBrowser: CefBrowser, frame: CefFrame, httpStatusCode: Int) {
                     if (!frame.isMain()) return
-                    // 不再 compareAndSet 守门：onLoadEnd 在路由切换/SPA 重渲染时会再次触发，
-                    // 注入是幂等的（先移除旧 style 再 append 新 style），每次都补一次最稳。
                     ApplicationManager.getApplication().invokeLater {
                         runCatching {
-                            executeInPage(buildCompactWorkspaceScript())
+                            injectCompactWorkspace(b)
                             executeInPage(buildDismissNoticeScript())
                             val fn = jsQuery?.getFuncName()
-                            if (fn != null) executeInPage(buildCaptureApiKeyScript(fn))
-                        }
+                            if (fn != null) {
+                                executeInPage(buildCaptureApiKeyScript(fn))
+                                executeInPage(buildInterceptFileClickScript(fn, bridgeManager?.bridgeUrl(), bridgeManager?.bridgeToken()))
+                            }
+                        }.onFailure { LOG.warn("onLoadEnd injection failed", it) }
                     }
                 }
             }, b.cefBrowser)
+            // 备用：每 2s 重试一次注入，覆盖 SPA 路由切换 / onLoadEnd 错过 / 页面被覆盖的场景。
+            // 脚本自身幂等（每次都会先 remove 旧 style 再 append 新 style），不会重复堆积。
+            startCompactRetryTimer(b)
             LOG.info("JCEF load handler installed")
         } catch (e: Throwable) {
             LOG.warn("failed to install JCEF load handler", e)
         }
+    }
+
+    /** 周期性重试注入（备用：onLoadEnd 路径失败或 SPA 路由切换时仍能生效）。 */
+    private fun startCompactRetryTimer(b: JBCefBrowser) {
+        if (compactRetryTimer != null) return
+        compactRetryTimer = javax.swing.Timer(2000) {
+            runCatching {
+                injectCompactWorkspace(b)
+                val fn = jsQuery?.getFuncName()
+                if (fn != null) {
+                    executeInPage(buildInterceptFileClickScript(fn, bridgeManager?.bridgeUrl(), bridgeManager?.bridgeToken()))
+                }
+            }
+        }.also { it.isRepeats = true; it.start() }
+    }
+
+    /** 真正调 dsh web 注入 compact-workspace 的入口（onLoadEnd 与轮询都用它）。 */
+    private fun injectCompactWorkspace(b: JBCefBrowser) {
+        val ok = executeInPage(buildCompactWorkspaceScript())
+        LOG.info("compact-workspace injection: ok=$ok")
     }
 
     /**
@@ -630,8 +801,6 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
      */
     private fun buildCompactWorkspaceScript(): String {
         val css = COMPACT_WORKSPACE_CSS
-        // 把 \n 转成 \n 转义序列内嵌到 JS 字符串里，避免 Kotlin raw string 的换行污染 JS 语法。
-        // 写入 <style> 标签；tag id 固定，先移除旧 tag 保证幂等；localStorage?mobileShell=0 时跳过。
         return """
         (() => {
           if (window.location.search.indexOf('mobileShell=0') >= 0) return;
@@ -646,6 +815,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
           s.type = 'text/css';
           s.appendChild(document.createTextNode(`__CSS__`));
           head.appendChild(s);
+          document.documentElement.setAttribute('data-dsh-idea-compact', '1');
         })();
         """.trimIndent()
             .replace("__CSS__", css)
@@ -693,6 +863,161 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         """.trimIndent()
 
     /**
+     * 在 IDEA 编辑器中打开指定路径文件（支持相对路径、绝对路径与智能模糊匹配，打开前自动同步刷新 VFS）。
+     */
+    private fun openFileInEditor(rawPath: String) {
+        // 只剥离末尾的行号标记，不能按冒号切分，否则 Windows 的 C:/ 会变成 C。
+        val cleanPath = rawPath.replace('\\', '/').trim()
+            .removePrefix("@")
+            .replace(Regex("(?:#L?\\d+(?:-L?\\d+)?|:\\d+(?::\\d+)?)$"), "")
+            .trim()
+        if (cleanPath.isBlank()) return
+
+        val base = project.basePath?.replace('\\', '/') ?: ""
+        val lfs = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+
+        // 1. 尝试绝对路径
+        var targetFile = java.io.File(cleanPath)
+        var vf = if (targetFile.isAbsolute) lfs.refreshAndFindFileByIoFile(targetFile) ?: lfs.refreshAndFindFileByPath(cleanPath) else null
+
+        // 2. 尝试基于当前项目根目录拼接
+        if (vf == null && base.isNotBlank()) {
+            val full = "$base/$cleanPath"
+            targetFile = java.io.File(full)
+            vf = lfs.refreshAndFindFileByIoFile(targetFile) ?: lfs.refreshAndFindFileByPath(full)
+        }
+
+        // 3. 尝试去除常见的首部斜杠或多余前缀
+        if (vf == null && base.isNotBlank()) {
+            val stripped = cleanPath.trimStart('/')
+            val full = "$base/$stripped"
+            targetFile = java.io.File(full)
+            vf = lfs.refreshAndFindFileByIoFile(targetFile) ?: lfs.refreshAndFindFileByPath(full)
+        }
+
+        // 4. 若仍找不到，尝试在当前项目虚拟文件系统中按文件名/相对路径末尾匹配（容错多模块相对路径）
+        if (vf == null && base.isNotBlank()) {
+            val projectBaseVf = lfs.refreshAndFindFileByPath(base)
+            if (projectBaseVf != null) {
+                val fileName = cleanPath.substringAfterLast('/')
+                com.intellij.openapi.vfs.VfsUtilCore.visitChildrenRecursively(projectBaseVf, object : com.intellij.openapi.vfs.VirtualFileVisitor<Void>() {
+                    override fun visitFile(f: com.intellij.openapi.vfs.VirtualFile): Boolean {
+                        if (vf != null) return false
+                        if (!f.isDirectory) {
+                            val p = f.path.replace('\\', '/')
+                            if (p.endsWith(cleanPath) || f.name == fileName) {
+                                vf = f
+                                return false
+                            }
+                        }
+                        return true
+                    }
+                })
+            }
+        }
+
+        LOG.info("openFileInEditor: rawPath=$rawPath, cleanPath=$cleanPath, base=$base, resolved=${vf?.path ?: "NOT_FOUND"}")
+        if (vf != null && !vf!!.isDirectory) {
+            val editors = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(vf!!, true)
+            LOG.info("openFileInEditor: openFile called for ${vf?.path}, editors=${editors.size}")
+        } else {
+            LOG.warn("openFileInEditor: file not found for rawPath=$rawPath (base=$base)")
+        }
+    }
+
+    /**
+     * 构建拦截 DSH 聊天区/工作区中文件链接与文件胶囊点击的注入脚本。
+     * 点击时阻止系统默认打开方式，通过 JBCefJSQuery 回传并在 IDEA 编辑器中打开。
+     */
+    private fun buildInterceptFileClickScript(funcName: String, bridgeUrl: String? = null, bridgeToken: String? = null): String {
+        val endpoint = escapeJs("${bridgeUrl ?: ""}/open-file")
+        val token = escapeJs(bridgeToken ?: "")
+        return """
+            (() => {
+              if (window.__dsh_idea_file_click_installed) return;
+              window.__dsh_idea_file_click_installed = true;
+              const report = (p) => {
+                try {
+                  const endpoint = $endpoint;
+                  const token = $token;
+                  if (endpoint && token) {
+                    fetch(endpoint + '?token=' + encodeURIComponent(token), {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ path: p })
+                    }).catch(() => {});
+                  }
+                  const value = '$OPEN_FILE_PREFIX' + p;
+                  const fn = window.$funcName;
+                  if (typeof fn === 'function') fn({ request: value, onSuccess: () => {}, onFailure: () => {} });
+                } catch (e) { console.warn('[dsh-idea] file callback failed', e); }
+              };
+
+              // 1. 劫持前端通过 API Client 调用的 host.openPath（精准满足 DSH Unary Envelope 回包格式）
+              const hookHostApi = () => {
+                if (window.fetch && !window.__dsh_orig_fetch) {
+                  const origFetch = window.fetch;
+                  window.__dsh_orig_fetch = origFetch;
+                  window.fetch = async function(resource, init) {
+                    try {
+                      const url = typeof resource === 'string' ? resource : (resource ? resource.url : '');
+                      if (url && (url.includes('/api/host.openPath') || url.includes('/api/workspaces.openFile') || url.includes('host.openPath'))) {
+                        if (init && init.body) {
+                          const bodyStr = typeof init.body === 'string' ? init.body : '';
+                          try {
+                            const reqData = JSON.parse(bodyStr);
+                            const p = (reqData && (reqData.path || (reqData.payload && reqData.payload.path))) || '';
+                            if (p) {
+                              report(p);
+                              // 满足 serverResponseSchema: { type: "server-response", rpcId, result: { ok: true, value: { opened: true } } }
+                              const rpcId = reqData.rpcId || ('rpc_' + Date.now());
+                              const respObj = {
+                                type: 'server-response',
+                                rpcId: rpcId,
+                                result: {
+                                  ok: true,
+                                  value: { opened: true }
+                                }
+                              };
+                              return new Response(JSON.stringify(respObj), {
+                                status: 200,
+                                headers: { 'Content-Type': 'application/json' }
+                              });
+                            }
+                          } catch (e) {}
+                        }
+                      }
+                    } catch (e) {}
+                    return origFetch.apply(this, arguments);
+                  };
+                }
+              };
+              hookHostApi();
+
+              // 2. 捕获 DOM 中的文件链接 / 产物胶囊点击（宽容匹配各种 class 与结构）
+              window.addEventListener('click', (e) => {
+                const target = e.target;
+                if (!target || !target.closest) return;
+                const fileEl = target.closest("[data-produced-files-row='true'] button[title], button[aria-label^='Open '], button[class$='_file'], button[class*='fileMention'], a[class*='fileMention'], [class*='filePill'], [class*='filePath'], [class*='path_'], [class*='fileLink'], [class*='_fileLink'], [class*='fileHeader'], [data-file-path]");
+                if (fileEl) {
+                  const aria = fileEl.getAttribute('aria-label') || '';
+                  const pathAttr = fileEl.getAttribute('data-file-path') || fileEl.getAttribute('data-path') || fileEl.getAttribute('title') || aria.replace(/^Open\s+/, '') || fileEl.innerText || fileEl.textContent || '';
+                  const clean = pathAttr.trim().replace(/^@+/, '');
+                  if (clean && (clean.includes('.') || clean.includes('/') || clean.includes('\\'))) {
+                    // 捕获阶段彻底阻断 DSH 原始 host.openPath，避免继续交给 Windows 文件关联。
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    console.info('[dsh-idea-file] click intercepted', { path: clean, tag: fileEl.tagName, className: fileEl.className });
+                    report(clean);
+                  }
+                }
+              }, true);
+            })();
+        """.trimIndent()
+    }
+
+    /**
      * 构建"自动点掉内测声明（Internal Testing Notice / 内测声明）"的注入脚本：
      * 轮询检测模态出现，点击 Continue（en）/继续（zh）按钮一次。acknowledge 后 dsh 写入
      * settings.yaml（ui-onboarding.welcomeNoticeVersion），同项目后续不再显示。失败静默。
@@ -725,7 +1050,16 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
             // create(JBCefBrowserBase) 为跨版本主 API（create(JBCefBrowser) 已弃用且 2026.2 可能移除）
             val query = JBCefJSQuery.create(b)
             query.addHandler { payload ->
-                if (payload.startsWith(APIKEY_PREFIX)) {
+                if (payload.startsWith(OPEN_FILE_PREFIX)) {
+                    // 拦截 DSH Web 中点击的文件链接 / 产物胶囊，直接在 IDEA 编辑器中打开
+                    val filePath = payload.removePrefix(OPEN_FILE_PREFIX).trim()
+                    LOG.info("JCEF file click callback received: path=" + filePath)
+                    if (filePath.isNotBlank()) {
+                        ApplicationManager.getApplication().invokeLater {
+                            openFileInEditor(filePath)
+                        }
+                    }
+                } else if (payload.startsWith(APIKEY_PREFIX)) {
                     // dsh "Add an API key" 弹窗输入的 Key：写回插件 PasswordSafe（脱敏显示 + 下次透传）
                     val key = payload.removePrefix(APIKEY_PREFIX)
                     ApplicationManager.getApplication().invokeLater {
