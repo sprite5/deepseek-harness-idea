@@ -1,0 +1,72 @@
+name: Build & Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # 按目标平台生成运行时 bundle（每个 runner 的 OS/arch 即目标，见 scripts/build-runtime.mjs）。
+  # 纯 Node 脚本，无需 Gradle / IDEA SDK，快且便宜。
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest   # win-x64
+          - os: macos-13         # macos-x64 (Intel)
+          - os: macos-14         # macos-arm64 (Apple Silicon)
+          - os: ubuntu-22.04     # linux-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build runtime bundle (host platform)
+        run: node scripts/build-runtime.mjs --bundle
+        env:
+          npm_config_registry: ${{ secrets.NPM_REGISTRY || 'https://registry.npmmirror.com/' }}
+      - name: Upload runtime artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.os }}
+          path: |
+            build/runtime-*.zip
+            build/runtime-*.zip.sha256
+          if-no-files-found: warn
+
+  # 构建瘦身通用插件 zip（任一平台即可；会下载 IDEA SDK，较慢）。
+  plugin:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - name: Build thin plugin (default)
+        run: ./gradlew buildPlugin --no-daemon --console=plain
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-thin
+          path: build/distributions/*.zip
+
+  # 打 tag 时把各平台运行时 + 瘦身插件 zip 附着到对应 GitHub Release。
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [runtime, plugin]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip*
+          generate_release_notes: true
