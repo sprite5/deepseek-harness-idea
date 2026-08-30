@@ -6,7 +6,7 @@
 | 日期 | 2026-02-11 |
 | 状态 | 草稿（随实现迭代更新） |
 | 目标 IDE | IntelliJ IDEA Community / Ultimate，2024.1 – 2026.2（since 241 / until 262.*，v0.1.1 起） |
-| 目标平台 | Windows 10/11 x64（MVP）；架构预留 macOS / Linux |
+| 目标平台 | Windows 10/11 x64（MVP）；macOS（arm64/x64）与 Linux x64 自 v0.2.0 起支持（运行时按平台下载） |
 
 ---
 
@@ -29,7 +29,7 @@ DeepSeek Harness（DSH）是一个以本地 Web UI（`dsh web`，默认 `http://
 2. 智能体以**当前打开的项目目录**为工作区：可读取、修改、新建项目文件。
 3. 通过 MCP 桥接，智能体可调用 IDE 能力：读取当前选中代码、打开的文件、项目结构、定位/打开文件。
 4. 提供原生 IDE 集成：右键"发送选中代码到 DSH"、AI 改动 diff 审查与还原。
-5. 插件自包含：打包 Node.js 运行时与 DSH，用户无需额外安装任何东西即可使用。
+5. 插件开箱即用：运行时按平台解析（Windows 首次下载一次，macOS/Linux 同样按需下载并 SHA-256 校验，缓存后复用），用户无需手动安装 Node / DSH。
 6. UI 中英双语。
 
 ### 2.2 非目标（MVP 明确不做）
@@ -37,9 +37,9 @@ DeepSeek Harness（DSH）是一个以本地 Web UI（`dsh web`，默认 `http://
 - 不实现独立的原生聊天 UI（聊天界面 = 嵌入的 DSH Web UI）。
 - 不实现 JetBrains AI 风格的内联代码补全 / 生成式重构动作（后续版本可考虑）。
 - 不支持 Remote Development / JetBrains Gateway（MVP 检测到远程环境时提示不可用）。
-- 不支持 macOS / Linux（架构预留，打包脚本按平台参数化）。
+- 运行时在 macOS / Linux 上通过「首次运行按平台下载」提供（v0.2.0 起支持）；不保证离线环境的首次自举，可用 `DSH_IDEA_RUNTIME` / 内网镜像 / fat zip 覆盖。
 - 不做智能体修改的自动接受提交（审查面板默认"接受=丢弃快照"，不写回，因为 dsh 已直接写盘）。
-- 不发布到 JetBrains Marketplace（MVP 以本地磁盘安装分发；上架作为后续规划，需评估插件包体积限制）。
+- 不发布到 JetBrains Marketplace（已上架 v0.1.3；v0.2.0 起为瘦身跨平台单包，符合 Marketplace 单版本单 zip 模型）。
 
 ## 3. 用户画像与核心场景
 
@@ -146,7 +146,7 @@ DeepSeek Harness（DSH）是一个以本地 Web UI（`dsh web`，默认 `http://
 | NFR-02 | 安全 | 所有服务仅绑定 127.0.0.1；MCP/Bridge 间使用随机 token；API Key 不落日志、不落插件源代码；不使用 `--host 0.0.0.0`（dsh 本身拒绝） |
 | NFR-03 | 可靠性 | 安装/解压幂等；崩溃可自动重启（退避）；项目关闭/IDE 退出无残留进程；磁盘写失败有明确报错 |
 | NFR-04 | 可维护性 | dsh 版本固定（`@deepseek-ai/dsh@0.1.1-rc.2`），升级=重建运行时；DSH_HOME 版本化目录便于升级；模块边界清晰（runtime/bridge/mcp/review/ui/settings 分离） |
-| NFR-05 | 兼容性 | IntelliJ IDEA 2024.1 – 2026.2（Community/Ultimate，until 262.*）；Windows 10/11 x64；路径含空格/中文可用；JCEF 不可用有降级 |
+| NFR-05 | 兼容性 | IntelliJ IDEA 2024.1 – 2026.2（Community/Ultimate，until 262.*）；Windows 10/11 x64、macOS（arm64/x64）、Linux x64；路径含空格/中文可用；JCEF 不可用有降级；运行时按平台解析（首次下载，缓存后离线可用，v0.2.0 起） |
 | NFR-06 | 可用性 | 关键失败（缺 Key、Node 缺失、端口异常、崩溃）均有中文+英文明确提示与恢复路径；不静默失败 |
 
 ## 7. 成功标准与验收清单
@@ -165,9 +165,9 @@ MVP 成功标准：全新 IDEA 实例中，安装插件 zip → 配置 API Key �
 
 ## 8. 假设与依赖
 
-- Windows 10/11 x64；IntelliJ IDEA Community/Ultimate 2024.1 – 2026.2（until 262.*）。
+- Windows 10/11 x64、macOS（arm64/x64）、Linux x64；IntelliJ IDEA Community/Ultimate 2024.1 – 2026.2（until 262.*）。
 - 用户持有 DeepSeek API Key（`deepseek-chat` / `deepseek-reasoner` 可用）。
-- 构建机有网络（构建时下载 Node 与 dsh 依赖）；**运行时离线可用**（运行时已打包）。
+- 构建机有网络（构建时下载 Node 与 dsh 依赖）；**运行时按平台解析**：首次使用需联网一次下载运行时（SHA-256 校验，缓存到配置目录后离线可用；离线可用 `DSH_IDEA_RUNTIME` / 内网镜像 / fat zip）。
 - dsh 版本固定 0.1.1-rc.2（与当前环境一致），其 Web UI 与 `--patch`/mcp-client 行为以该版本为准。
 - 插件不修改用户本机已有的 DeepSeek 配置（独立 DSH_HOME），避免与浏览器版 dsh 互相干扰。
 

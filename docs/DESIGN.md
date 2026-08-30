@@ -71,7 +71,7 @@
    拒绝 Web UI 的 set；见 §3.9 与 PROJECT_NOTES §4）。
 4. **Profile 合成**：`profiles/<name>/cordis.yml` 初始为 `[]`，由 bundle 层（`package.json` 的 `dsh.profile.bundles`）+ `cordis.patch.yml` 用户层 + `--patch` 覆盖层合成。插件以 `--patch <ide.yml>` 注入 mcp-client，不污染用户层。
 5. **MCP 客户端**：`@deepseek-ai/dsh-mcp-client` 支持 `transport: streamable-http`；每实例一个 serverName；模型侧工具名为 `mcp__<serverName>__<rawName>`（serverName 须匹配 `^[A-Za-z0-9_-]{1,32}$`）。其依赖 `@modelcontextprotocol/sdk` 存在于 profile 的 hoisted `node_modules`，可被插件附带的 MCP server 脚本 import（脚本置于 DSH_HOME 下按 node 向上查找规则解析）。
-6. **运行时**：固定 `@deepseek-ai/dsh@0.1.1-rc.2` + Node.js 22.x win-x64（与当前环境一致），随插件打包。
+6. **运行时**：固定 `@deepseek-ai/dsh@0.1.1-rc.2` + Node.js 22.x，**按平台解析**——Windows 首次下载一次，macOS/Linux 按需下载并 SHA-256 校验；缓存到 `<config>/dsh-idea/runtime/<ver>/` 后离线可用（v0.2.0 起）。
 
 ## 3. 模块设计
 
@@ -112,33 +112,32 @@
 
 ### 3.2 运行时打包与 DSH_HOME 管理
 
-**构建期**（`scripts/build-runtime.ps1`，Gradle task `buildRuntime` 调用；已实现并实测通过）：
+**构建期**（`scripts/build-runtime.mjs`，Gradle task `buildRuntime` 调用；跨平台，可跑在任意主机，默认取当前主机 os/arch 为目标）：
 
-1. 下载 Node.js 22.x win-x64（固定版本，SHA-256 校验）→ `<OutputDir>/node/`。
-2. 以 npm 安装 `@deepseek-ai/dsh@0.1.1-rc.2` 及其依赖到 `<OutputDir>/dsh/`（`--ignore-scripts`；
-   win-x64 原生依赖均以 optionalDependencies 预编译产物提供，无需 postinstall）。
-3. 冒烟验证：读取 `dsh` 版本；`-Bundle` 时打包 `runtime-bundle.zip`（**zip 根直接为 `node/` + `dsh/`**，
-   排除源 zip 与 npm 缓存；Step 5 已实测 106.9MB、解压 62s）。
-4. 下载/安装均为幂等（存在且校验通过则跳过；`-Force` 重建）。
+1. 下载 Node.js 22.x（按目标平台选 `win-*.zip` / `darwin-*.tar.gz` / `linux-*.tar.gz`，SHA-256 从同版本官方 `SHASUMS256.txt` 校验）→ 归一化到 `<OutputDir>/node/`（Windows=`node.exe` 顶层；Unix 将 `bin/node` 上移为 `node/node` 并加可执行位）。
+2. 以目标 node 的 npm 安装 `@deepseek-ai/dsh@0.1.1-rc.2` 及其依赖到 `<OutputDir>/dsh/`（`--ignore-scripts`；npm 依 `--os/--cpu` 解析目标平台原生 optionalDependencies，如 sharp/koffi/node-addon-require-builtin）。
+3. 冒烟验证：读取 `dsh` 版本；`--bundle` 时打包 `runtime-<os>-<arch>.zip`（**zip 根直接为 `node/` + `dsh/`**，排除源包与 npm 缓存），并产出同名 `.sha256` 侧车。
+4. 下载/安装均为幂等（存在且校验通过则跳过；`--force` 重建）。
 
-**打包**（Step 5）：`buildRuntime -Bundle` → `build/runtime-bundle.zip` → Gradle `bundleRuntime` 复制到
-`build/plugin-runtime/` → 作为插件资源打入 jar（`/runtime-bundle.zip`）；`processResources` 依赖 `bundleRuntime`。
+**打包**：`buildRuntime`（`--bundle`）→ `build/runtime-<os>-<arch>.zip` + `.sha256`。瘦身默认（thin）不把运行时打进插件 jar；`-Pthin=false` 时 `bundleRuntime` 把当前平台 zip 复制为 `build/plugin-runtime/runtime-bundle.zip` 作为插件资源（fat / 离线备选）。
 
 **运行期**（`DshHomeManager`）：
 
 - 运行时根（`node/` + `dsh/`）：`PathManager.getConfigDir()/dsh-idea/runtime/<version>/`
   （开发态用环境变量 `DSH_IDEA_RUNTIME` 覆盖，如 `tooling/runtime-dev`）。
-- **首次使用自举**（FR-02.1）：`hasRuntime()` 在本地缺失且无 override 时，从插件资源 `/runtime-bundle.zip`
-  解压（幂等；zip 兼容顶层单目录前缀剥离 + zip-slip 防护）。
+- **首次使用自举**（FR-02.1；v0.2.0 起按平台解析）：`hasRuntime()` 在本地缺失且无 override 时：
+  a) fat 安装 → 从插件资源 `/runtime-bundle.zip` 解压；b) 瘦身安装 → 经 `RuntimeProvisioner` 按当前平台
+  从 `runtime-assets.json` 资产地图下载 `runtime-<os>-<arch>.zip`，SHA-256 比对（`.sha256` 侧车）后安全解压
+  （幂等；zip 兼容顶层单目录前缀剥离 + zip-slip 防护）。下载地址可在设置页覆盖。
 - DSH_HOME：`PathManager.getConfigDir()/dsh-idea/dsh-home/`（与运行时分离，不随版本变化）。
   插件幂等生成 `profiles/web/`（package.json + cordis.yml）与 `ide.yml`；dsh 首次启动时
   自愈创建 `profiles/node_modules` junction 指向运行时 dsh 树（实测验证）。
 - 生成运行期文件：全局凭据文件（从设置页，PasswordSafe 镜像）、`ide.yml`（patch，含 mcp-client 配置与 bridge 地址/token）。
-- 初始化顺序：校验运行时（必要时解压）→ 生成 DSH_HOME → 写凭据 → 写 patch → 启动进程 → 健康检查。
+- 初始化顺序：校验/下载运行时（必要时解压）→ 生成 DSH_HOME → 写凭据 → 写 patch → 启动进程 → 健康检查。
 
 ### 3.3 DshProcessManager
 
-- `ProcessBuilder`：`[node.exe, <dsh>/lib/bin.js, --profile, web, --patch, <ide.yml>, --host, 127.0.0.1, --port, 0, --no-open]`；`directory = 项目根目录`；env：`DSH_HOME=<dsh-home>`、`DSH_IDE_BRIDGE_URL=http://127.0.0.1:<bridgePort>`、`DSH_IDE_TOKEN=<random>`；**不注入 `DEEPSEEK_API_KEY`**（见 §2.3/§3.9）；`redirectErrorStream=true` 或分别捕获。
+- `ProcessBuilder`：`[<node>, <dsh>/lib/bin.js, --profile, web, --patch, <ide.yml>, --host, 127.0.0.1, --port, 0, --no-open]`（`<node>` = `node/node.exe` 或 `node/node`，见 `Platform.nodeBinName`）；`directory = 项目根目录`；env：`DSH_HOME=<dsh-home>`、`DSH_IDE_BRIDGE_URL=http://127.0.0.1:<bridgePort>`、`DSH_IDE_TOKEN=<random>`；**不注入 `DEEPSEEK_API_KEY`**（见 §2.3/§3.9）；`redirectErrorStream=true` 或分别捕获。
 - **参数列表直传，不走 shell**（兼容路径含空格/中文）。
 - stdout 逐行读取：匹配 `dsh web: http://127.0.0.1:(\d+)` → 记录 webPort → HTTP GET `/`（或 `/api`）健康检查（超时 10s，重试 ≤10 次间隔 500ms）→ 回调通知工具窗口加载。
 - 崩溃/退出监听：非预期退出（无 `stop` 标记）→ 通知 + 指数退避自动重启（500ms/2s/5s，≤3 次）→ 手动"重启"按钮；日志写入插件日志 + 工具窗口日志页。
@@ -366,7 +365,7 @@ stdout   = 逐行读取；含 "dsh web: http://127.0.0.1:<webPort>"
 ```
 <PathManager.getConfigDir()>/dsh-idea/
 ├── runtime/<version>/            # 运行时（随版本升级；开发态 DSH_IDEA_RUNTIME 覆盖；全局共享，不按项目）
-│   ├── node/                     # Node.js 运行时（win-x64）
+│   ├── node/                     # Node.js 运行时（按平台：node.exe / node，归一化布局）
 │   └── dsh/                      # npm 安装的 @deepseek-ai/dsh 树（含全部依赖）
 ├── dsh-home/                     # DSH_HOME 根（v0.1.3-dev：全局配置 + 每项目隔离数据）
 │   ├── 凭据文件                   #   全局凭据真源（PasswordSafe 镜像；方案A）
@@ -516,3 +515,4 @@ PRD §7 验收清单 9 条（含 v0.1.3-dev 新增"DSH 一键解释"）。
 | 2026-08-23 | v0.1.3-dev | **设置页 API Key 脱敏回显**（用户要求"显示前 6 位 + 中间脱敏 + 后 6 位"）：`DshCredentials.maskApiKey(key)` —— 前 6 位 + `******` + 后 6 位（≤12 位整段脱敏）；`DshSettingsConfigurable` 回显脱敏串（改用 `JBTextField`，否则 `JBPasswordField` 把文本渲染成掩码点，用户看不到脱敏串），`isModified`/`apply` 用"字段内容 ≠ 当前脱敏串"判定用户是否真的改了 key，避免把脱敏串当真实 key 写回密码库。新增 DshCredentialsMaskTest 6 例 |
 | 2026-08-23 | v0.1.3-dev | **设置页回显兜底：凭据文件读取**（用户实测"改后仍为空"）：PasswordSafe 读不到 key 时设置页回显为空。`DshCredentials.readApiKeyFromCredentialFile`（行级解析）＋ `readApiKeyWithFallback`（先 PasswordSafe，无则回退插件全局凭据文件，方案A真源）；设置页 `readStoredApiKey()` 用它。DshCredentialsMaskTest 增至 10 例 |
 | 2026-08-23 | v0.1.3-dev | **dsh Web UI 改 API key 也要全局生效**（用户要求+选B方案）：① 去掉 `DshProcessManager` 启动时注入的 `DEEPSEEK_API_KEY` 环境变量——dsh-credentials-local 的 `resolve()` 是 `inherited env wins`，注入 env 会使 dsh 永远读旧值，且 Web UI 改 key 被 `assertUnshadowed` 直接拒绝（源码 `dsh-credentials-local lib/index.js:636`）；② 新增 `DshCredentialsSync`（`WatchService` 监听各项目 DSH_HOME 凭据文件，dsh Web UI/Models page 以 `version:1 + refs.DEEPSEEK_API_KEY` 写入该文件 → 捕获 → 回写 PasswordSafe + 插件全局凭据文件）。**方案B 语义**：改 key 的那个 dsh 进程（去 env 后读文件层，该进程立即生效），其它项目**下次启动/重启**时 `syncCredentials()`/`ensureHome()` 从全局复制+透传 → 全局一致。监听器随项目 Disposable 释放（`DshCredentialsSync.release(projectName)`）。`onFileChanged` 仅当子项目 key 与全局不同才回写（无自激循环）。新增 DshCredentialsSyncTest 6 例 |
+| 2026-08-30 | v0.2.0 | **macOS / Linux 主机兼容（瘦身通用插件 + 按平台下载运行时）**：① `Platform`（os/arch→target/nodeBinName/assetName，前缀匹配防 `darwin`/`win` 冲突）；`DshHomeManager.nodeExe()` 平台化，`DshProcessManager.killTree` 跨平台进程树，symlink 兜底仅 Windows；② `RuntimeProvisioner`+`RuntimeArchive`+`RuntimeAssets`（`runtime-assets.json` 资产地图；下载+`.sha256` 校验+安全解压；`DSH_IDEA_RUNTIME`/手动路径离线逃生）；设置页「运行时下载地址」；③ `build-runtime.mjs`（跨平台，任意主机产出 `runtime-<os>-<arch>.zip`+`.sha256`）；Gradle `buildRuntime` 改调 mjs、瘦身默认（`-Pthin=false` 保留 fat）、新增 Gradle wrapper；④ `.github/workflows/build-release.yml` 矩阵 + `docs/release-runtime.md`；测试 100/100（PlatformTest/RuntimeAssetsTest/RuntimeProvisionerTest） |

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    JCEF 附加配置（当 IntelliJ 2026.2+ 的 com.intellij.modules.jcef 插件存在时加载）。
+
+    <depends optional="true" config-file="jcef.xml">com.intellij.modules.jcef</depends>
+    约定：config-file 在 optional 依赖为 true 时是必填的附加配置描述文件；此处为空（本插件
+    的 JCEF 使用全部在 Java 代码中（JBCefBrowser），无需在 xml 注册额外扩展点）。
+    该文件仅在 jcef 依赖存在（2026.2+）时被加载；2024.1–2025.3 的 JCEF 在平台核心，不会加载它。
+-->
+<idea-plugin />

@@ -29,6 +29,7 @@ class DshSettingsConfigurable : SearchableConfigurable {
     private var modelCombo: ComboBox<String>? = null
     private var baseUrlField: JBTextField? = null
     private var logLevelCombo: ComboBox<String>? = null
+    private var runtimeDownloadField: JBTextField? = null
     private var importStatus: JBLabel? = null
 
     /** 当前密码库中的真实 API Key（用于 apply 时区分"用户未改"与"用户输入新值"）。 */
@@ -67,6 +68,10 @@ class DshSettingsConfigurable : SearchableConfigurable {
         }
         logLevelCombo = logLevel
 
+        // 平台兼容：运行时下载地址（覆盖默认 GitHub Releases baseUrl；{version} 占位符运行期替换）
+        val runtimeDownload = JBTextField(state.runtimeDownloadUrl.orEmpty()).apply { columns = 40 }
+        runtimeDownloadField = runtimeDownload
+
         val importButton = JButton(DshBundle.message("settings.import.button")).apply {
             addActionListener {
                 importStatus?.text = "…"
@@ -93,6 +98,7 @@ class DshSettingsConfigurable : SearchableConfigurable {
             .addComponentToRightColumn(importButton)
             .addComponentToRightColumn(status)
             .addLabeledComponent(JBLabel(DshBundle.message("settings.logLevel.label")), logLevel, 1, false)
+            .addLabeledComponent(JBLabel(DshBundle.message("settings.runtimeDownload.label")), runtimeDownload, 1, false)
             .addComponent(JBLabel(DshBundle.message("settings.apply.note")))
             .addVerticalGap(8)
             .panel
@@ -103,7 +109,8 @@ class DshSettingsConfigurable : SearchableConfigurable {
         val model = modelCombo?.selectedItem as? String
         val logLevel = logLevelCombo?.selectedItem as? String
         return state.model != model || state.baseUrl != baseUrlField?.text?.trim().orEmpty() ||
-            state.logLevel != logLevel || apiKeyChanged()
+            state.logLevel != logLevel || state.runtimeDownloadUrl?.trim().orEmpty() != runtimeDownloadField?.text?.trim().orEmpty() ||
+            apiKeyChanged()
     }
 
     /** 用户是否改了 API Key（字段内容 ≠ 当前脱敏回显，即为新值）。 */
@@ -119,6 +126,7 @@ class DshSettingsConfigurable : SearchableConfigurable {
         state.baseUrl = baseUrlField?.text?.trim()?.ifEmpty { "https://api.deepseek.com" }
             ?: "https://api.deepseek.com"
         state.logLevel = logLevelCombo?.selectedItem as? String ?: "info"
+        state.runtimeDownloadUrl = runtimeDownloadField?.text?.trim()?.takeIf { it.isNotEmpty() }
 
         // 仅当用户实际输入了新 key（而非脱敏回显原样）才写回，避免把脱敏串当 key 保存。
         val key = apiKeyField?.text?.trim().orEmpty()
@@ -137,6 +145,7 @@ class DshSettingsConfigurable : SearchableConfigurable {
         modelCombo?.selectedItem = state.model
         baseUrlField?.text = state.baseUrl
         logLevelCombo?.selectedItem = state.logLevel
+        runtimeDownloadField?.text = state.runtimeDownloadUrl.orEmpty()
         storedApiKey = readStoredApiKey()
         apiKeyField?.text = DshCredentials.maskApiKey(storedApiKey)
         importStatus?.text = " "

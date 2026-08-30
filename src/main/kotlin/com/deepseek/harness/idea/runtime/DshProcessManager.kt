@@ -238,13 +238,23 @@ class DshProcessManager(
 
     private fun killTree(pid: Long) {
         try {
-            val os = System.getProperty("os.name", "").lowercase()
-            val cmd = if (os.contains("win")) listOf("taskkill", "/PID", pid.toString(), "/T", "/F")
-            else listOf("kill", "-9", pid.toString())
-            ProcessBuilder(cmd).start().waitFor(3, TimeUnit.SECONDS)
+            if (Platform.current().os == Platform.Os.WINDOWS) {
+                // taskkill /T /F 终止整棵进程树（Windows 兜底，防残留）
+                ProcessBuilder(listOf("taskkill", "/PID", pid.toString(), "/T", "/F"))
+                    .start().waitFor(3, TimeUnit.SECONDS)
+            } else {
+                killProcessTree(pid)
+            }
         } catch (e: Exception) {
             LOG.warn("failed to kill process tree $pid", e)
         }
+    }
+
+    /** Unix：用 [ProcessHandle] 终止进程树（父 + 全部后代），避免 `kill -9 <pid>` 只杀父进程残留 worker。 */
+    private fun killProcessTree(pid: Long) {
+        val handle = ProcessHandle.of(pid).orElse(null) ?: return
+        handle.descendants().forEach { runCatching { it.destroyForcibly() } }
+        runCatching { handle.destroyForcibly() }
     }
 
     private fun setState(newState: State) {

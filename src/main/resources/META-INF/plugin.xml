@@ -43,6 +43,15 @@
             <li>Use <i>Review changes</i> in the tool window to inspect and restore agent edits.</li>
         </ol>
 
+        <h4>Runtime &amp; offline</h4>
+        <p>Node.js and the DeepSeek Harness runtime are resolved per platform (Windows / macOS ARM64 &amp; x64 /
+        Linux x64) and downloaded once on first use (SHA-256 verified), then reused from
+        <code>&lt;config&gt;/dsh-idea/runtime/&lt;version&gt;/</code>. To use a locally prepared runtime instead,
+        set the <code>DSH_IDEA_RUNTIME</code> environment variable (or the <i>Runtime directory</i> field in
+        Settings) to a directory containing <code>node/</code> and <code>dsh/</code>. The <i>Runtime download URL</i>
+        setting overrides the official download source (e.g. an internal mirror) but does not change where the
+        runtime is stored.</p>
+
         <h3>中文</h3>
         <p><b>DeepSeek Harness</b> 把 DeepSeek Harness 智能体工作台完整嵌入 IntelliJ IDEA：在 IDE
         内嵌的 Web 界面中与智能体对话，让它读写你的项目文件，并用原生 diff 工具审查它的改动——
@@ -79,10 +88,33 @@
             把上下文交给它。</li>
             <li>在工具窗口使用 <i>审查改动</i> 查看并还原智能体的修改。</li>
         </ol>
+
+        <h4>运行时与离线</h4>
+        <p>Node.js 与 DeepSeek Harness 运行时按平台（Windows / macOS ARM64 &amp; x64 / Linux x64）解析，首次使用
+        一次性下载（SHA-256 校验），之后复用 <code>&lt;config&gt;/dsh-idea/runtime/&lt;version&gt;/</code>。如需改用
+        本地已备好的运行时，可设置 <code>DSH_IDEA_RUNTIME</code> 环境变量（或设置页「运行时目录」）指向一个包含
+        <code>node/</code> 与 <code>dsh/</code> 的目录；「Runtime download URL」用于覆盖官方下载源（如内网镜像），
+        但不会改变运行时的落盘目录。</p>
     ]]></description>
 
     <change-notes><![CDATA[
         <h3>English / 中文</h3>
+        <h4>v0.2.0</h4>
+        <ul>
+            <li>Fixed an install-time "invalid plugin descriptor" error on some IDE versions: the optional
+            dependency on the JCEF module now declares its required <code>config-file</code>, so the plugin
+            descriptor is valid on IntelliJ 2024.1–2026.2.</li>
+            <li>修复部分 IDE 版本安装时报 "invalid plugin descriptor" 的问题：JCEF 模块的可选依赖现补上
+            必填的 <code>config-file</code>，使插件描述符在 IntelliJ 2024.1–2026.2 上均合法。</li>
+        </ul>
+        <ul>
+            <li>Cross-platform runtime: the plugin now runs on IntelliJ IDEA on macOS and Linux hosts, not only Windows. The Node.js + DeepSeek Harness runtime is resolved per platform and downloaded once on first use (SHA-256 verified); existing Windows installs reuse the already-extracted runtime seamlessly.</li>
+            <li>跨平台运行时：插件现可在 macOS 与 Linux 主机上的 IntelliJ IDEA 运行，而不再仅支持 Windows。Node.js 与 DeepSeek Harness 运行时按平台解析，首次使用一次性下载（SHA-256 校验）；存量 Windows 安装会无缝复用已解压的运行时。</li>
+        </ul>
+        <ul>
+            <li>Thin &amp; configurable package: the plugin zip no longer bundles the ~93MB runtime by default (Marketplace-friendly); the per-platform runtime is fetched on demand. An optional fat zip (<code>-Pthin=false</code>) remains available for offline / air-gapped installs, and the runtime download base URL is configurable in Settings.</li>
+            <li>瘦身与可配置包：插件包默认不再内置约 93MB 运行时（利于 Marketplace）；按平台运行时按需获取。仍可构建含运行时的 fat 包（<code>-Pthin=false</code>）用于离线/内网安装；运行时下载地址可在设置中覆盖。</li>
+        </ul>
         <h4>v0.1.3</h4>
         <ul>
             <li>Per-project DSH_HOME: workspace and sessions are now isolated per project, so switching
@@ -169,8 +201,9 @@
          使用 JCEF（JBCefBrowser）的插件须显式声明依赖，否则运行时 NoClassDefFoundError。
          该别名自 2025.3.1 (build 253) 引入；为兼容 2024.1–2025.3（JCEF 在平台核心、无此插件 id），
          用 optional 依赖：253+ 建立依赖使 JCEF 类可见，241–252 缺失时忽略（走核心 JCEF）。
-         见 docs/PROJECT_NOTES.md "2026.2 JCEF 拆分"。 -->
-    <depends optional="true">com.intellij.modules.jcef</depends>
+         NOTE：optional=true 时 schema 要求必须给出 config-file（附加配置描述文件，见 META-INF/jcef.xml），
+         否则加载期报 "invalid plugin descriptor"。见 docs/PROJECT_NOTES.md "2026.2 JCEF 拆分"。 -->
+    <depends optional="true" config-file="jcef.xml">com.intellij.modules.jcef</depends>
 
     <idea-version since-build="241" until-build="262.*"/>
 

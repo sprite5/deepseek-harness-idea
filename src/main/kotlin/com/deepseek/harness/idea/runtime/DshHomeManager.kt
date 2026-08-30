@@ -29,6 +29,9 @@ class DshHomeManager : Disposable {
         /** 固定 dsh 版本（升级 = 换版本 + 重建运行时，见 DESIGN §3.2） */
         const val DSH_VERSION = "0.1.1-rc.2"
 
+        /** 运行时下载地址模板里的 `{version}` 占位符使用的插件版本取不到时回退。 */
+        const val FALLBACK_PLUGIN_VERSION = "0.2.0"
+
         /** 开发态覆盖：DSH_IDEA_RUNTIME=<目录> 直接使用该目录下的 node/ 与 dsh/ */
         const val RUNTIME_OVERRIDE_ENV = "DSH_IDEA_RUNTIME"
 
@@ -56,29 +59,52 @@ class DshHomeManager : Disposable {
         return PathManager.getConfigDir().resolve("dsh-idea").resolve("runtime").resolve(DSH_VERSION)
     }
 
-    fun nodeExe(): Path = runtimeRoot().resolve("node/node.exe")
+    /** node 可执行文件（Windows=`node/node.exe`；Unix=`node/node`，构建期已归一化布局）。 */
+    fun nodeExe(): Path = runtimeRoot().resolve("node").resolve(Platform.current().nodeBinName)
 
     fun dshBin(): Path = runtimeRoot().resolve("dsh/node_modules/@deepseek-ai/dsh/lib/bin.js")
 
     /**
-     * 运行时可用性检查（Step 5 FR-02.1）：
+     * 运行时可用性检查（Step 5 FR-02.1；扩展：瘦身通用插件按平台下载）：
      * - `DSH_IDEA_RUNTIME` 覆盖存在 → 用之；
-     * - 否则若配置目录缺运行时，尝试从插件资源 `runtime-bundle.zip` 解压（首次使用自举）。
+     * - 否则若配置目录缺运行时：先尝试从插件资源 `runtime-bundle.zip` 解压（fat zip / 旧版），
+     *   无资源时按当前平台从资产地图下载运行时（瘦身版）。
      */
     fun hasRuntime(): Boolean {
-        if (Files.isRegularFile(nodeExe()) && Files.isRegularFile(dshBin())) return true
+        if (RuntimeProvisioner.isPresent(runtimeRoot())) return true
         if (System.getenv(RUNTIME_OVERRIDE_ENV) != null) return false // 覆盖显式指向但缺失 → 报错
-        return extractBundledRuntime()
+        return provisionRuntime()
     }
 
-    /** 从插件资源解压内嵌运行时（幂等：已存在则跳过；失败返回 false）。 */
+    /** 供供给：内置资源解压 → 无资源时按平台下载。任一步成功即视为运行时就绪。 */
+    private fun provisionRuntime(): Boolean {
+        if (extractBundledRuntime()) return true
+        return downloadRuntime()
+    }
+
+    /** 瘦身通用插件：按当前平台从资产地图下载运行时（SHA-256 校验 + 安全解压）。 */
+    private fun downloadRuntime(): Boolean {
+        val override = com.deepseek.harness.idea.settings.DshSettingsState.getInstance().runtimeDownloadUrl
+            ?.trim()?.takeIf { it.isNotEmpty() }
+        val spec = RuntimeAssets.load(override)
+        val ok = RuntimeProvisioner.provision(runtimeRoot(), spec, pluginVersion())
+        if (!ok) LOG.warn("runtime download/provision failed for ${Platform.current().id} (base=${spec.baseUrl})")
+        return ok
+    }
+
+    private fun pluginVersion(): String = try {
+        val id = com.intellij.openapi.extensions.PluginId.getId("com.deepseek.harness.idea")
+        com.intellij.ide.plugins.PluginManagerCore.getPlugin(id)?.version
+            ?.takeIf { it.isNotBlank() }
+            ?: FALLBACK_PLUGIN_VERSION
+    } catch (e: Exception) {
+        FALLBACK_PLUGIN_VERSION
+    }
+
+    /** 从插件资源解压内嵌运行时（幂等：已存在则跳过；无资源返回 false）。 */
     private fun extractBundledRuntime(): Boolean {
         val target = runtimeRoot()
-        if (Files.isRegularFile(target.resolve("node/node.exe")) &&
-            Files.isRegularFile(target.resolve("dsh/node_modules/@deepseek-ai/dsh/lib/bin.js"))
-        ) {
-            return true
-        }
+        if (RuntimeProvisioner.isPresent(target)) return true
         val resource = RUNTIME_BUNDLE_RESOURCE
         val stream = try {
             DshHomeManager::class.java.getResourceAsStream(resource)
@@ -86,7 +112,7 @@ class DshHomeManager : Disposable {
             null
         }
         if (stream == null) {
-            LOG.info("no bundled runtime resource ($resource); dev mode expects DSH_IDEA_RUNTIME")
+            LOG.info("no bundled runtime resource ($resource); thin build expects on-demand download")
             return false
         }
         LOG.info("extracting bundled runtime to $target")
@@ -94,33 +120,12 @@ class DshHomeManager : Disposable {
             Files.createDirectories(target)
             val tmpZip = target.resolveSibling("runtime-bundle-${System.nanoTime()}.zip")
             stream.use { src -> Files.copy(src, tmpZip, java.nio.file.StandardCopyOption.REPLACE_EXISTING) }
-            unzip(tmpZip, target)
+            RuntimeArchive.unzip(tmpZip, target)
             Files.deleteIfExists(tmpZip)
-            Files.isRegularFile(nodeExe()) && Files.isRegularFile(dshBin())
+            RuntimeProvisioner.isPresent(target)
         } catch (e: Exception) {
             LOG.warn("failed to extract bundled runtime", e)
             false
-        }
-    }
-
-    private fun unzip(zip: Path, dest: Path) {
-        java.util.zip.ZipFile(zip.toFile()).use { zf ->
-            // 兼容 zip 顶层带单目录前缀（如 runtime/）的情况：剥掉第一层
-            val entries = zf.entries().asSequence().filter { !it.isDirectory }.toList()
-            val topPrefix = entries.mapNotNull { entry ->
-                entry.name.split('/').firstOrNull()?.takeIf { it.isNotEmpty() }
-            }.distinct().let { if (it.size == 1) it.first() + "/" else "" }
-
-            for (entry in entries) {
-                val rel = entry.name.removePrefix(topPrefix)
-                val out = dest.resolve(rel).normalize()
-                // 防 zip-slip
-                if (!out.startsWith(dest)) continue
-                Files.createDirectories(out.parent)
-                zf.getInputStream(entry).use { input ->
-                    Files.copy(input, out, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-                }
-            }
         }
     }
 
@@ -231,7 +236,12 @@ class DshHomeManager : Disposable {
             Files.createSymbolicLink(link, target)
             LOG.info("created DSH_HOME/node_modules junction -> $target")
         } catch (e: Exception) {
-            // 沙箱/权限受限时退回 cmd mklink /J（junction 不需要管理员）
+            // 沙箱/权限受限时，Windows 退回 cmd mklink /J（junction 不需要管理员）；
+            // Unix 上 createSymbolicLink 通常无需管理员即可成功，此处不调用 Windows 专用命令。
+            if (Platform.current().os != Platform.Os.WINDOWS) {
+                LOG.warn("failed to create node_modules symlink $link -> $target (unix)", e)
+                return
+            }
             try {
                 val p = ProcessBuilder("cmd", "/c", "mklink", "/J", link.toString(), target.toString())
                     .redirectErrorStream(true)

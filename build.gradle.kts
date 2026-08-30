@@ -10,13 +10,27 @@ plugins {
 }
 
 group = "com.deepseek.harness"
-version = "0.1.3"
+version = "0.2.0"
 
 repositories {
     mavenCentral()
 }
 
 val platformVersion: String = providers.gradleProperty("platformVersion").getOrElse("2024.1.7")
+
+// 跨平台运行时构建（脚本跑在任意主机，默认取当前主机 os/arch 作为目标平台）。
+// 瘦身默认（thin=true）：运行时不打进插件 jar，改为首次运行按平台下载（见 DshHomeManager/RuntimeProvisioner）。
+// `-Pthin=false` 时打包一个含当前主机平台运行时的 fat zip（离线/air-gapped 备选）。
+val thin: Boolean = providers.gradleProperty("thin").map { it.toBoolean() }.getOrElse(true)
+val dshVersion: String = "0.1.1-rc.2"
+
+val hostOs: String = when {
+    System.getProperty("os.name").lowercase().contains("win") -> "win"
+    System.getProperty("os.name").lowercase().contains("mac") || System.getProperty("os.name").lowercase().contains("darwin") -> "macos"
+    System.getProperty("os.name").lowercase().contains("linux") -> "linux"
+    else -> "win"
+}
+val hostArch: String = if (System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm64") }) "arm64" else "x64"
 
 dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
@@ -51,10 +65,11 @@ kotlin {
     }
 }
 
-// Step 5：运行时 bundle 作为插件资源参与打包（build/plugin-runtime/，由 bundleRuntime 产出）
+// Step 5：运行时 bundle 作为插件资源参与打包（build/plugin-runtime/，由 bundleRuntime 产出）。
+// 仅 fat（-Pthin=false）时把该目录注册为资源源；瘦身插件按平台下载运行时，避免残留 bundle 误打入。
 sourceSets {
     main {
-        resources.srcDir(layout.buildDirectory.dir("plugin-runtime"))
+        if (!thin) resources.srcDir(layout.buildDirectory.dir("plugin-runtime"))
     }
 }
 
@@ -88,26 +103,29 @@ tasks {
         useJUnitPlatform()
     }
 
-    // Step 2：构建内嵌运行时（scripts/build-runtime.ps1，见 docs/DESIGN.md §3.2）
+    // Step 2：构建内嵌运行时（scripts/build-runtime.mjs；默认取当前主机平台，见 docs/DESIGN.md §3.2）
     register("buildRuntime", Exec::class) {
         description = "Build the embedded DSH runtime (Node + @deepseek-ai/dsh) into build/runtime"
         group = "build"
-        val script = rootProject.file("scripts/build-runtime.ps1")
+        val script = rootProject.file("scripts/build-runtime.mjs")
         val outputDir = rootProject.file("build/runtime")
         inputs.file(script)
         outputs.dir(outputDir)
         commandLine(
-            "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-            script.absolutePath, "-OutputDir", outputDir.absolutePath, "-Bundle"
+            "node", script.absolutePath,
+            "--output", outputDir.absolutePath,
+            "--dsh-version", dshVersion,
+            "--bundle"
         )
     }
 
-    // Step 5：运行时打入插件资源（buildRuntime 产物压缩包 → build/plugin-runtime/）
+    // Step 5：运行时打入插件资源（仅 fat、`-Pthin=false` 时）。瘦身插件依赖按平台下载运行时。
     register("bundleRuntime", Copy::class) {
         description = "Package the built runtime as runtime-bundle.zip into plugin resources"
         group = "build"
+        enabled = !thin
         dependsOn("buildRuntime")
-        val bundle = rootProject.file("build/runtime-bundle.zip")
+        val bundle = rootProject.file("build/runtime-${hostOs}-${hostArch}.zip")
         val dest = rootProject.layout.buildDirectory.dir("plugin-runtime")
         inputs.file(bundle)
         outputs.dir(dest)
@@ -115,8 +133,8 @@ tasks {
         into(dest)
     }
 
-    // 打包资源前先确保运行时 bundle 就位（若已构建过；未构建时跳过以免拖慢纯代码构建）
+    // 打包资源时仅 fat（-Pthin=false）确保持运行时 bundle 就位；瘦身插件无需运行时打包
     processResources {
-        dependsOn("bundleRuntime")
+        if (!thin) dependsOn("bundleRuntime")
     }
 }

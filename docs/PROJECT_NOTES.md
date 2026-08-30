@@ -218,13 +218,12 @@ src/main/resources/
 
 ## 5. 打包 / 运行时（Step 5 实测）
 
-- 链路：`buildRuntime`（build-runtime.ps1：下载 Node 22.23.2 + SHA256 校验 + npm 装 dsh）→ `-Bundle` 产出
-  `build/runtime-bundle.zip`（**zip 根直接 `node/`+`dsh/`**，排除源 zip 与 npm 缓存；实测 106.9MB）→
-  Gradle `bundleRuntime` 复制到 `build/plugin-runtime/` → `processResources` 依赖它打入 jar（`/runtime-bundle.zip`）。
-- 运行期自举：`DshHomeManager.hasRuntime()` 在本地缺失且无 `DSH_IDEA_RUNTIME` 时从插件资源解压
-  （幂等；`unzip` 兼容顶层单目录前缀剥离 + zip-slip 防护；实测解压 62s，解压后 dsh web 可启动）。
-- 插件 zip 约 98MB（含 106.9MB 压缩运行时），符合 PRD 体积预期（150-300MB 内）。
-- Node 版本：**v22.23.2**（npmmirror 二进制镜像；SHA256 `1177B413...`）；dsh 固定 `@deepseek-ai/dsh@0.1.1-rc.2`。
+- 链路（v0.2.0 起跨平台，`scripts/build-runtime.mjs`，任意主机，默认取当前主机 os/arch）：下载 Node 22.23.2（按平台选 `win-*.zip`/`darwin-*.tar.gz`/`linux-*.tar.gz`，SHA-256 从同版本 `SHASUMS256.txt` 校验）→ 归一化 `node/<nodeBin>` → npm 装 `@deepseek-ai/dsh@0.1.1-rc.2` 到 `dsh/` → 冒烟 → `--bundle` 产出 `build/runtime-<os>-<arch>.zip`（**zip 根直接 `node/`+`dsh/`**，排除源包与 npm 缓存）+ 同名 `.sha256` 侧车。
+- 分发：瘦身默认（thin）不把运行时打入插件 jar；`-Pthin=false` 时 `bundleRuntime` 把当前平台 zip 复制为 `build/plugin-runtime/runtime-bundle.zip` 作为插件资源（fat / 离线备选）。
+- 运行期自举（v0.2.0）：`DshHomeManager.hasRuntime()` → 本地缺失且无 `DSH_IDEA_RUNTIME` 时，fat 安装从插件资源解压，瘦身安装经 `RuntimeProvisioner` 按平台从 `runtime-assets.json` 资产地图下载 + `.sha256` 校验 + 安全解压（幂等；`unzip` 兼容顶层单目录前缀剥离 + zip-slip 防护）。
+- **跨 OS 原生依赖**：dsh 树含平台专属原生依赖（`@img/sharp-*`、`@koromix/koffi-*`、`node-addon-require-builtin-*`，被 dsh-subprocess-local/dsh-attachment-local/cordis-plugin-loader import），**不能跨平台共享一个 dsh 树**；运行时必须按目标 OS 生成。推荐 CI 矩阵在各目标 OS runner 构建；用 npm `--os/--cpu` 交叉仅作捷径（有变体不全风险）。
+- 插件包：瘦身约 1.8MB；fat 约 93–98MB（含压缩运行时）。
+- Node 版本：**v22.23.2**（npmmirror/官方二进制镜像，SHA-256 校验）；dsh 固定 `@deepseek-ai/dsh@0.1.1-rc.2`。
 
 ---
 
@@ -232,11 +231,11 @@ src/main/resources/
 
 | 层 | 类 | 说明 |
 |---|---|---|
-| 单元 | PortParserTest(4) / McpPatchGeneratorTest(6) / SnapshotDiffTest(5) / PathFiltersTest(5) / SentSelectionQueueTest(5) / WorkspaceInitializerTest(12) / DshRuntimeRegistryTest(3) / CredentialImporterTest(4) / **JsonCodecTest(v0.1.1,9)** / **ExplainLogComposerTest(v0.1.3-dev,4)** / **LegacySessionMigratorTest(v0.1.3-dev,14)** / **DshCredentialsMaskTest(v0.1.3-dev,10)** / **DshCredentialsSyncTest(v0.1.3-dev,6)** | 纯 JUnit，无 IDE 依赖 |
+| 单元 | PortParserTest(4) / McpPatchGeneratorTest(6) / SnapshotDiffTest(5) / PathFiltersTest(5) / SentSelectionQueueTest(5) / WorkspaceInitializerTest(12) / DshRuntimeRegistryTest(3) / CredentialImporterTest(4) / **JsonCodecTest(v0.1.1,9)** / **ExplainLogComposerTest(v0.1.3-dev,4)** / **LegacySessionMigratorTest(v0.1.3-dev,14)** / **DshCredentialsMaskTest(v0.1.3-dev,10)** / **DshCredentialsSyncTest(v0.1.3-dev,5)** / **PlatformTest(v0.2.0,10)** / **RuntimeAssetsTest(v0.2.0,6)** / **RuntimeProvisionerTest(v0.2.0,7)** | 纯 JUnit，无 IDE 依赖 |
 | 集成冒烟 | DshBootstrapSmokeTest(真实 dsh 启动 + workspace 注册断言) / DshMcpBridgeSmokeTest(mock bridge + MCP tools/list 6 工具 + failOnStartupError 严格启动) / WorkspaceInitializerSmokeTest(切换项目工作区顺序) / **LegacySessionMigratorSmokeTest(v0.1.3-dev：zstd session 迁移后 workspace.json 自动挂接)** | 需 `DSH_IDEA_RUNTIME`，否则跳过 |
 
 - 冒烟测试注意：临时 DSH_HOME 内 dsh 自愈 junction 指向 runtime → **tearDown 必须先 unlinkJunctions 再让 `@TempDir` 清理**，否则清空 runtime（见 §4）。
-- 测试计数：**90 个**（截至 v0.1.3-dev；86 单元 + 4 集成冒烟；沙箱下需完整权限，否则 Gradle native 服务初始化失败）。
+- 测试计数：**113 个**（截至 v0.2.0；109 单元 + 4 集成冒烟；沙箱下需完整权限，否则 Gradle native 服务初始化失败）。
 
 ---
 

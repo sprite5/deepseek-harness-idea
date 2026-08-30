@@ -22,6 +22,9 @@ class DshSettingsState : PersistentStateComponent<DshSettingsState> {
     /** 高级：DSH_HOME 覆盖路径；null = 使用插件配置目录默认值 */
     var dshHomeOverride: String? = null
 
+    /** 高级：运行时下载地址（覆盖默认 GitHub Releases baseUrl；支持 {version} 占位符） */
+    var runtimeDownloadUrl: String? = null
+
     var logLevel: String = "info"
 
     override fun getState(): DshSettingsState = this

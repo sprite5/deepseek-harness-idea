@@ -1,0 +1,10 @@
+{
+  "baseUrl": "https://github.com/tieJiangW/deepseek-harness-idea/releases/download/v{version}",
+  "assets": {
+    "win-x64": "runtime-win-x64.zip",
+    "macos-arm64": "runtime-macos-arm64.zip",
+    "macos-x64": "runtime-macos-x64.zip",
+    "linux-x64": "runtime-linux-x64.zip",
+    "linux-arm64": "runtime-linux-arm64.zip"
+  }
+}
