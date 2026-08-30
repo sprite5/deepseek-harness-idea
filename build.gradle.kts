@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.io.File
 
 plugins {
     java
@@ -31,6 +32,10 @@ val hostOs: String = when {
     else -> "win"
 }
 val hostArch: String = if (System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm64") }) "arm64" else "x64"
+
+// 构建期把插件版本注入生成资源（dsh-build-info.properties），供运行期读取——
+// 避免在运行期读 @Internal 的 com.intellij.ide.plugins.PluginManagerCore（verifier 报 internal API usage）。
+val generatedResources = layout.buildDirectory.dir("generated-resources/main")
 
 dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
@@ -67,9 +72,11 @@ kotlin {
 
 // Step 5：运行时 bundle 作为插件资源参与打包（build/plugin-runtime/，由 bundleRuntime 产出）。
 // 仅 fat（-Pthin=false）时把该目录注册为资源源；瘦身插件按平台下载运行时，避免残留 bundle 误打入。
+// 另注册构建期生成的版本资源目录（generateBuildInfo）。
 sourceSets {
     main {
         if (!thin) resources.srcDir(layout.buildDirectory.dir("plugin-runtime"))
+        resources.srcDir(generatedResources)
     }
 }
 
@@ -133,8 +140,21 @@ tasks {
         into(dest)
     }
 
+    // 构建期把项目版本写入生成资源（DshHomeManager.pluginVersion() 运行期读取，避免用 @Internal 的 PluginManagerCore）
+    register("generateBuildInfo") {
+        val v: String = version.toString()
+        inputs.property("version", v)
+        outputs.dir(generatedResources)
+        doLast {
+            val dir = generatedResources.get().asFile
+            dir.mkdirs()
+            File(dir, "dsh-build-info.properties").writeText("version=$v\n")
+        }
+    }
+
     // 打包资源时仅 fat（-Pthin=false）确保持运行时 bundle 就位；瘦身插件无需运行时打包
     processResources {
         if (!thin) dependsOn("bundleRuntime")
+        dependsOn("generateBuildInfo")
     }
 }

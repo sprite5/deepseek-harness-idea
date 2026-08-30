@@ -29,8 +29,8 @@ class DshHomeManager : Disposable {
         /** 固定 dsh 版本（升级 = 换版本 + 重建运行时，见 DESIGN §3.2） */
         const val DSH_VERSION = "0.1.1-rc.2"
 
-        /** 运行时下载地址模板里的 `{version}` 占位符使用的插件版本取不到时回退。 */
-        const val FALLBACK_PLUGIN_VERSION = "0.2.0"
+        /** 构建期注入的版本信息资源（generateBuildInfo 产出，供运行期读取插件版本，避免用内部 API）。 */
+        const val BUILD_INFO_RESOURCE = "/dsh-build-info.properties"
 
         /** 开发态覆盖：DSH_IDEA_RUNTIME=<目录> 直接使用该目录下的 node/ 与 dsh/ */
         const val RUNTIME_OVERRIDE_ENV = "DSH_IDEA_RUNTIME"
@@ -92,13 +92,15 @@ class DshHomeManager : Disposable {
         return ok
     }
 
+    /** 运行期读取插件版本：来自构建期注入的 `dsh-build-info.properties`（无内部 API，见 build.gradle.kts generateBuildInfo）。 */
     private fun pluginVersion(): String = try {
-        val id = com.intellij.openapi.extensions.PluginId.getId("com.deepseek.harness.idea")
-        com.intellij.ide.plugins.PluginManagerCore.getPlugin(id)?.version
-            ?.takeIf { it.isNotBlank() }
-            ?: FALLBACK_PLUGIN_VERSION
+        val stream = DshHomeManager::class.java.getResourceAsStream(BUILD_INFO_RESOURCE)
+            ?: run { LOG.warn("$BUILD_INFO_RESOURCE not found; runtime download version falls back to empty"); return "" }
+        val props = java.util.Properties().apply { load(stream) }
+        (props.getProperty("version") ?: "").takeIf { it.isNotBlank() } ?: ""
     } catch (e: Exception) {
-        FALLBACK_PLUGIN_VERSION
+        LOG.warn("failed to read $BUILD_INFO_RESOURCE", e)
+        ""
     }
 
     /** 从插件资源解压内嵌运行时（幂等：已存在则跳过；无资源返回 false）。 */
