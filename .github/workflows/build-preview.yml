@@ -1,0 +1,115 @@
+# v0.1.7 preview CI：3 个平台 runner 各构建一个自包含插件 zip（仅 dsh 树，无 node），
+# 附到 GitHub Release（prerelease）。
+#
+# 触发：
+#   - push branch `preview/**`     → 构建 + 上传 artifact（不打 Release）
+#   - push tag `v0.1.7-preview.*`  → 构建 + 上传 artifact + 创建 prerelease
+#   - workflow_dispatch            → 手动触发（测试用）
+#
+# 平台矩阵（v0.1.7 preview）：win-x64 / macos-arm64 / linux-x64
+# macos-x64 暂不出（Intel Mac 小众；后续按需加 macos-13 runner）
+#
+# 每平台产物：build/distributions/dsh-idea-simple-<host>-<ver>.zip
+# 体积 ~50-60MB（仅 dsh 树 + Kotlin 类，不含 node）
+name: Build Preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'preview/**'
+    tags:
+      - 'v0.1.7-preview.*'
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '20'
+  JAVA_VERSION: '21'
+  NPM_REGISTRY: 'https://registry.npmmirror.com/'
+  DSH_VERSION: '0.1.1-rc.2'
+  HANUI_VERSION: '0.2.5'
+
+jobs:
+  build:
+    name: build/${{ matrix.osid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            os: win32
+            arch: x64
+            osid: win-x64
+            gradle: .\gradlew.bat
+          - runner: macos-14
+            os: darwin
+            arch: arm64
+            osid: macos-arm64
+            gradle: ./gradlew
+          - runner: ubuntu-22.04
+            os: linux
+            arch: x64
+            osid: linux-x64
+            gradle: ./gradlew
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # 1) 构建 dsh 树（不含 node）；--os/--arch 显式声明目标平台，让 npm 解析正确 optionalDependencies
+      - name: Build dsh tree (no node bundled)
+        shell: bash
+        env:
+          NPM_CONFIG_FETCH_TIMEOUT: '120000'
+          NPM_CONFIG_FETCH_RETRIES: '3'
+          NPM_CONFIG_LOGLEVEL: 'warn'
+        run: |
+          node scripts/build-dsh.mjs \
+            --os ${{ matrix.os }} \
+            --arch ${{ matrix.arch }} \
+            --registry "${{ env.NPM_REGISTRY }}" \
+            --dsh-version "${{ env.DSH_VERSION }}" \
+            --hanui-version "${{ env.HANUI_VERSION }}" \
+            --bundle
+
+      # 2) 打包插件 zip（bundleDsh 把 build/dsh-<os>-<arch>.zip 重命名 dsh-bundle.zip 打进资源）
+      - name: Build plugin zip
+        run: ${{ matrix.gradle }} buildPlugin --no-daemon
+
+      # 3) 上传产物（release job 在 tag 推送时下载所有平台产物一起附到 Release）
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-${{ matrix.osid }}
+          path: build/distributions/*.zip
+          if-no-files-found: error
+          retention-days: 60
+
+  release:
+    name: publish release (tag only)
+    if: startsWith(github.ref, 'refs/tags/v0.1.7-preview')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true
+          prerelease: true

@@ -32,8 +32,11 @@ class DshHomeManager : Disposable {
         /** 开发态覆盖：DSH_IDEA_RUNTIME=<目录> 直接使用该目录下的 node/ 与 dsh/ */
         const val RUNTIME_OVERRIDE_ENV = "DSH_IDEA_RUNTIME"
 
-        /** 插件资源中的运行时压缩包（build-runtime.ps1 -Bundle 产物，Step 5 打入 resources） */
-        const val RUNTIME_BUNDLE_RESOURCE = "/runtime-bundle.zip"
+        /**
+         * 插件资源中的 dsh 树压缩包（build-dsh.mjs --bundle 产物，Step 5 打入 resources）。
+         * v0.1.7 起不含 node；node 由宿主系统提供（见 [SystemNodeLocator]）。
+         */
+        const val DSH_BUNDLE_RESOURCE = "/dsh-bundle.zip"
 
         const val DEEPSEEK_API_KEY = "DEEPSEEK_API_KEY"
 
@@ -65,49 +68,51 @@ class DshHomeManager : Disposable {
         return PathManager.getConfigDir().resolve("dsh-idea").resolve("runtime").resolve(DSH_VERSION)
     }
 
-    fun nodeExe(): Path = runtimeRoot().resolve("node/node.exe")
+    /**
+     * 系统 node 可执行文件（v0.1.7 起：node 不再打包）。
+     * @return 解析成功返回 Path；未找到或 `node --version` 失败返回 null，调用方负责给出可操作报错。
+     */
+    fun nodeExe(): Path? = SystemNodeLocator.resolve()?.path
 
     fun dshBin(): Path = runtimeRoot().resolve("dsh/node_modules/@deepseek-ai/dsh/lib/bin.js")
 
     /**
-     * 运行时可用性检查（Step 5 FR-02.1）：
-     * - `DSH_IDEA_RUNTIME` 覆盖存在 → 用之；
-     * - 否则若配置目录缺运行时，尝试从插件资源 `runtime-bundle.zip` 解压（首次使用自举）。
+     * 运行时可用性检查（v0.1.7 起：仅校验 dsh 树，node 由系统提供、启动时另行检测）：
+     * - `DSH_IDEA_RUNTIME` 覆盖存在 → 用之（且 dsh 树就绪）；
+     * - 否则若配置目录缺 dsh 树，从插件资源 `dsh-bundle.zip` 解压（首次使用自举）。
      */
     fun hasRuntime(): Boolean {
-        if (Files.isRegularFile(nodeExe()) && Files.isRegularFile(dshBin())) return true
+        if (Files.isRegularFile(dshBin())) return true
         if (System.getenv(RUNTIME_OVERRIDE_ENV) != null) return false // 覆盖显式指向但缺失 → 报错
-        return extractBundledRuntime()
+        return extractBundledDshBundle()
     }
 
-    /** 从插件资源解压内嵌运行时（幂等：已存在则跳过；失败返回 false）。 */
-    private fun extractBundledRuntime(): Boolean {
+    /** 从插件资源解压 dsh 树（幂等：dshBin 已存在则跳过；失败返回 false）。v0.1.7 起不含 node。 */
+    private fun extractBundledDshBundle(): Boolean {
         val target = runtimeRoot()
-        if (Files.isRegularFile(target.resolve("node/node.exe")) &&
-            Files.isRegularFile(target.resolve("dsh/node_modules/@deepseek-ai/dsh/lib/bin.js"))
-        ) {
+        if (Files.isRegularFile(target.resolve("dsh/node_modules/@deepseek-ai/dsh/lib/bin.js"))) {
             return true
         }
-        val resource = RUNTIME_BUNDLE_RESOURCE
+        val resource = DSH_BUNDLE_RESOURCE
         val stream = try {
             DshHomeManager::class.java.getResourceAsStream(resource)
         } catch (e: Exception) {
             null
         }
         if (stream == null) {
-            LOG.info("no bundled runtime resource ($resource); dev mode expects DSH_IDEA_RUNTIME")
+            LOG.info("no bundled dsh resource ($resource); dev mode expects DSH_IDEA_RUNTIME")
             return false
         }
-        LOG.info("extracting bundled runtime to $target")
+        LOG.info("extracting bundled dsh tree to $target")
         return try {
             Files.createDirectories(target)
-            val tmpZip = target.resolveSibling("runtime-bundle-${System.nanoTime()}.zip")
+            val tmpZip = target.resolveSibling("dsh-bundle-${System.nanoTime()}.zip")
             stream.use { src -> Files.copy(src, tmpZip, java.nio.file.StandardCopyOption.REPLACE_EXISTING) }
             unzip(tmpZip, target)
             Files.deleteIfExists(tmpZip)
-            Files.isRegularFile(nodeExe()) && Files.isRegularFile(dshBin())
+            Files.isRegularFile(dshBin())
         } catch (e: Exception) {
-            LOG.warn("failed to extract bundled runtime", e)
+            LOG.warn("failed to extract bundled dsh tree", e)
             false
         }
     }

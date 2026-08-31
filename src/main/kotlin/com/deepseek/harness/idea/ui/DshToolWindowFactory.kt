@@ -329,6 +329,17 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
             showError(DshBundle.message("error.runtimeMissing", DshHomeManager.RUNTIME_OVERRIDE_ENV))
             return
         }
+        // 系统 node 检测（v0.1.7 起：运行时不再打包 node，改用宿主系统的 node）
+        val nodeInfo = com.deepseek.harness.idea.runtime.SystemNodeLocator.resolve()
+        if (nodeInfo == null) {
+            showError(com.deepseek.harness.idea.runtime.SystemNodeLocator.missingMessage())
+            return
+        }
+        if (!nodeInfo.meetsMinimum()) {
+            showError("系统 Node.js ${nodeInfo.version} 过低，需要 ≥ ${com.deepseek.harness.idea.runtime.SystemNodeLocator.MIN_NODE_MAJOR}。\n请升级 Node.js LTS：https://nodejs.org/，或通过环境变量 ${com.deepseek.harness.idea.runtime.SystemNodeLocator.OVERRIDE_ENV} 指定更高版本。")
+            return
+        }
+        val nodeFile = nodeInfo.path.toFile()
         // Step 5 FR-02.6：并发上限 3
         if (!com.deepseek.harness.idea.runtime.DshRuntimeRegistry.getInstance()
                 .tryAcquire(project.name, this)
@@ -366,7 +377,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
                 // Step 3：MCP 桥接编排（bridge + mcp-ide-server + ide.yml patch）
                 val bridge = DshBridgeManager(
                     project = project,
-                    nodeExe = homeManager.nodeExe().toFile(),
+                    nodeExe = nodeFile,
                     workDir = File(projectRoot.ifEmpty { System.getProperty("user.home") }),
                     homeDir = homePath,
                 )
@@ -375,7 +386,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
 
                 val patchFile = waitForMcpPatch(bridge, homePath)
                 val manager = DshProcessManager(
-                    nodeExe = homeManager.nodeExe().toFile(),
+                    nodeExe = nodeFile,
                     dshBin = homeManager.dshBin().toFile(),
                     workDir = File(projectRoot.ifEmpty { System.getProperty("user.home") }),
                     homeDir = home,

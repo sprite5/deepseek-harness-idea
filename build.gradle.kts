@@ -10,13 +10,22 @@ plugins {
 }
 
 group = "com.deepseek.harness"
-version = "0.1.6"
+version = "0.1.7"
 
 repositories {
     mavenCentral()
 }
 
 val platformVersion: String = providers.gradleProperty("platformVersion").getOrElse("2024.1.7")
+
+// 当前主机平台（用于挑对应的 dsh-bundle 打进插件资源；每 zip 自包含一个平台的 dsh 树，node 不打包）
+val hostOs: String = when {
+    System.getProperty("os.name").lowercase().contains("win") -> "win"
+    System.getProperty("os.name").lowercase().contains("mac") || System.getProperty("os.name").lowercase().contains("darwin") -> "macos"
+    System.getProperty("os.name").lowercase().contains("linux") -> "linux"
+    else -> "win"
+}
+val hostArch: String = if (System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm64") }) "arm64" else "x64"
 
 dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
@@ -88,38 +97,43 @@ tasks {
         useJUnitPlatform()
     }
 
-    // Step 2：构建内嵌运行时（scripts/build-runtime.ps1，见 docs/DESIGN.md §3.2）
-    register("buildRuntime", Exec::class) {
-        description = "Build the embedded DSH runtime (Node + @deepseek-ai/dsh) into build/runtime"
+    // Step 2：构建 dsh 树（scripts/build-dsh.mjs；不含 node，运行时用系统 node）。输出 build/dsh-<hostOs>-<hostArch>.zip。
+    register("buildDsh", Exec::class) {
+        description = "Build the dsh tree (@deepseek-ai/dsh + dsh-mobile-hanui) for the host platform; no node bundled"
         group = "build"
-        val script = rootProject.file("scripts/build-runtime.ps1")
-        val outputDir = rootProject.file("build/runtime")
+        val script = rootProject.file("scripts/build-dsh.mjs")
+        val outputDir = rootProject.file("build/dsh-${hostOs}-${hostArch}")
+        val bundleZip = rootProject.file("build/dsh-${hostOs}-${hostArch}.zip")
         inputs.file(script)
         outputs.dir(outputDir)
+        outputs.file(bundleZip)
         commandLine(
-            "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-            script.absolutePath, "-OutputDir", outputDir.absolutePath, "-Bundle"
+            "node", script.absolutePath,
+            "--output", outputDir.absolutePath,
+            "--bundle"
         )
     }
 
-    // Step 5：运行时打入插件资源（buildRuntime 产物压缩包 → build/plugin-runtime/）
-    register("bundleRuntime", Copy::class) {
-        description = "Package the built runtime as runtime-bundle.zip into plugin resources"
+    // Step 5：把主机平台的 dsh zip 打进插件资源（重命名为 dsh-bundle.zip，由 DshHomeManager.DSH_BUNDLE_RESOURCE 读取）。
+    // 先清空 plugin-runtime/ 旧残留（如上一版的 runtime-bundle.zip），避免被 sourceSets 一并打入新插件造成体积膨胀。
+    register("bundleDsh", Copy::class) {
+        description = "Package the built dsh tree as dsh-bundle.zip into plugin resources (per host platform)"
         group = "build"
-        // 若已有 build/runtime-bundle.zip，直接复用既有离线包，避免每次全量 buildRuntime 联网
-        if (!rootProject.file("build/runtime-bundle.zip").exists()) {
-            dependsOn("buildRuntime")
+        // 若已有 build/dsh-<hostOs>-<hostArch>.zip，直接复用既有离线包，避免每次全量 buildDsh 联网
+        val bundle = rootProject.file("build/dsh-${hostOs}-${hostArch}.zip")
+        if (!bundle.exists()) {
+            dependsOn("buildDsh")
         }
-        val bundle = rootProject.file("build/runtime-bundle.zip")
         val dest = rootProject.layout.buildDirectory.dir("plugin-runtime")
         inputs.file(bundle)
         outputs.dir(dest)
-        from(bundle) { rename { "runtime-bundle.zip" } }
+        doFirst { dest.get().asFile.deleteRecursively() }
+        from(bundle) { rename { "dsh-bundle.zip" } }
         into(dest)
     }
 
-    // 打包资源前先确保运行时 bundle 就位（若已构建过；未构建时跳过以免拖慢纯代码构建）
+    // 打包资源前先确保 dsh bundle 就位（若已构建过；未构建时跳过以免拖慢纯代码构建）
     processResources {
-        dependsOn("bundleRuntime")
+        dependsOn("bundleDsh")
     }
 }
