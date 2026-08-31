@@ -1,6 +1,6 @@
 <idea-plugin>
-    <id>com.deepseek.harness.idea</id>
-    <name>DeepSeek Harness</name>
+    <id>cn.jascript.deepseek-harness-idea</id>
+    <name>dsh-idea-simple</name>
     <vendor>DeepSeek Harness Dev</vendor>
 
     <description><![CDATA[
@@ -171,7 +171,7 @@
     </applicationListeners>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow id="DeepSeek Harness" anchor="right"
+        <toolWindow id="DSH Simple" anchor="right"
                     factoryClass="com.deepseek.harness.idea.ui.DshToolWindowFactory"
                     icon="/icons/dsh-toolwindow.svg"/>
 

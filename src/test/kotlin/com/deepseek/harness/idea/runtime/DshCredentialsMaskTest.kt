@@ -86,4 +86,39 @@ class DshCredentialsMaskTest {
         )
         assertEquals("sk-abc123456789", DshCredentials.readApiKeyFromCredentialFile(f))
     }
+
+    @Test
+    fun `readAllRefs parses dsh native refs format including pi keys`() {
+        val f = tmp.resolve(".credentials.yaml")
+        Files.writeString(
+            f,
+            "version: 1\nrefs:\n  DEEPSEEK_API_KEY: sk-ds-123456\n  MINIMAX_CN_API_KEY: sk-ms-654321\n  AIYUNROUTER_API_KEY: sk-ai-112233\n",
+            StandardCharsets.UTF_8
+        )
+        val refs = DshCredentials.readAllRefs(f)
+        assertEquals(3, refs.size)
+        assertEquals("sk-ds-123456", refs[DshCredentials.DEEPSEEK_API_KEY])
+        assertEquals("sk-ms-654321", refs["MINIMAX_CN_API_KEY"])
+        assertEquals("sk-ai-112233", refs["AIYUNROUTER_API_KEY"])
+    }
+
+    @Test
+    fun `readAllRefs parses legacy flat format`() {
+        val f = tmp.resolve(".credentials.yaml")
+        Files.writeString(f, "DEEPSEEK_API_KEY: sk-flat-123456\n", StandardCharsets.UTF_8)
+        assertEquals(mapOf("DEEPSEEK_API_KEY" to "sk-flat-123456"), DshCredentials.readAllRefs(f))
+    }
+
+    @Test
+    fun `writeRefs then readAllRefs roundtrips all keys`() {
+        val f = tmp.resolve(".credentials.yaml")
+        DshCredentials.writeRefs(f, mapOf(
+            "DEEPSEEK_API_KEY" to "sk-ds-123456",
+            "MINIMAX_CN_API_KEY" to "sk-ms-654321",
+        ))
+        val refs = DshCredentials.readAllRefs(f)
+        assertEquals(2, refs.size)
+        assertEquals("sk-ds-123456", refs["DEEPSEEK_API_KEY"])
+        assertEquals("sk-ms-654321", refs["MINIMAX_CN_API_KEY"])
+    }
 }

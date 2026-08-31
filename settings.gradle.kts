@@ -5,4 +5,4 @@ pluginManagement {
     }
 }
 
-rootProject.name = "deepseek-harness-idea"
+rootProject.name = "dsh-idea-simple-win"

@@ -76,7 +76,7 @@ class SendSelectionAction : AnAction(DshBundle.message("action.sendSelection")) 
     private fun notify(project: Project, content: String) {
         com.intellij.notification.Notifications.Bus.notify(
             com.intellij.notification.Notification(
-                "DeepSeek Harness",
+                "DSH Simple",
                 "",
                 content,
                 com.intellij.notification.NotificationType.INFORMATION,

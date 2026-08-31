@@ -209,16 +209,33 @@ class DshHomeManager : Disposable {
         }
     }
 
-    /** 把全局配置文件（.credentials.yaml / settings.yaml）复制到子目录（幂等；仅当全局存在）。 */
+    /** 把全局配置文件（.credentials.yaml / settings.yaml）同步到子目录（幂等；仅当全局存在）。 */
     private fun copyGlobalConfigTo(home: Path) {
         val g = globalConfigHome()
         for (name in listOf(".credentials.yaml", "settings.yaml")) {
             val src = g.resolve(name)
-            if (Files.exists(src)) {
-                Files.createDirectories(home)
+            if (!Files.exists(src)) continue
+            Files.createDirectories(home)
+            if (name == ".credentials.yaml") {
+                // 凭据：合并而不是覆盖 —— 保留子目录里已有的第三方 provider（llm-pi-ai）key，
+                // 同时补入全局的共享 refs。旧实现 REPLACE_EXISTING 会丢掉当前项目已配好的
+                // MINIMAX/aiyunrouter 等 apiKeyEnv，导致每次重开反复要求重新输入密钥。
+                copyCredRefsMerged(home, src)
+            } else {
                 Files.copy(src, home.resolve(name), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             }
         }
+    }
+
+    /** 全局凭据（可能含 pi provider key）合并进子目录凭据，保留子目录已有 refs，不覆盖。 */
+    private fun copyCredRefsMerged(home: Path, globalSrc: Path) {
+        val dest = home.resolve(".credentials.yaml")
+        val destRefs = DshCredentials.readAllRefs(dest)
+        val globalRefs = DshCredentials.readAllRefs(globalSrc)
+        val merged = LinkedHashMap<String, String>(globalRefs)
+        // 保留子目录已有、全局缺失的 key（如仅在本地项目配置过的 provider）
+        for ((k, v) in destRefs) if (!merged.containsKey(k)) merged[k] = v
+        DshCredentials.writeRefs(dest, merged)
     }
 
     /** 预写全局 settings.yaml：ui-onboarding.welcomeNoticeVersion = 已接受版本（文件已存在则不覆盖）。 */
@@ -326,14 +343,15 @@ class DshHomeManager : Disposable {
     fun syncCredentials(): Boolean {
         val key = DshCredentials.readApiKey() ?: return false
         val credFile = globalConfigHome().resolve(".credentials.yaml")
-        val content = "$DEEPSEEK_API_KEY: $key\n"
         return try {
-            if (!Files.exists(credFile) || Files.readString(credFile) != content) {
-                writeUtf8(credFile, content)
-                true
-            } else {
-                false
+            val refs = LinkedHashMap<String, String>(DshCredentials.readAllRefs(credFile))
+            val changed = refs[DEEPSEEK_API_KEY] != key
+            // 保存成 dsh 原生 refs 格式（保留已有的第三方 pi provider key，不丢）
+            if (changed || !Files.exists(credFile)) {
+                refs[DEEPSEEK_API_KEY] = key
+                DshCredentials.writeRefs(credFile, refs)
             }
+            changed || !Files.exists(credFile)
         } catch (e: Exception) {
             LOG.warn("failed to sync credentials to DSH_HOME", e)
             false

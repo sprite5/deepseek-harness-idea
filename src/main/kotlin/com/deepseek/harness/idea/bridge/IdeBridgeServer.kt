@@ -1,6 +1,7 @@
 package com.deepseek.harness.idea.bridge
 
 import com.deepseek.harness.idea.util.JsonCodec
+import com.intellij.ide.projectView.ProjectView
 import com.intellij.lang.LanguageUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
@@ -242,6 +243,9 @@ class IdeBridgeServer(
                 }
                 if (refreshPath(path) != null) refreshed += path else missing += path
             }
+            // 新增/删除文件后同步刷新项目树（Project View），否则新文件不会立即出现在项目树中，
+            // 需用户手动刷新。ProjectView.refresh() 必须在 EDT 调用。
+            refreshProjectView()
         }
         json(exchange, 200, mapOf("ok" to true, "refreshed" to refreshed, "missing" to missing))
     }
@@ -261,6 +265,15 @@ class IdeBridgeServer(
             .firstOrNull() ?: return null
         VfsUtil.markDirtyAndRefresh(false, vf.isDirectory, true, vf)
         return vf
+    }
+
+    /** 刷新 Project View 树，使新增/删除的文件/目录立即出现在项目树中。必须在 EDT 调用。 */
+    private fun refreshProjectView() {
+        try {
+            ProjectView.getInstance(project).refresh()
+        } catch (e: Exception) {
+            LOG.warn("failed to refresh project view", e)
+        }
     }
 
     private fun isProjectPath(path: String): Boolean = try {

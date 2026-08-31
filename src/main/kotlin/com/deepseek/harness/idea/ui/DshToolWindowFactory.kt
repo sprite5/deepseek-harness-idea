@@ -82,7 +82,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         private const val CARD_LOADING = "loading"
         private const val CARD_BROWSER = "browser"
         private const val CARD_ERROR = "error"
-        const val TOOL_WINDOW_ID = "DeepSeek Harness"
+        const val TOOL_WINDOW_ID = "DSH Simple"
 
         /** JBCefJSQuery 回传里标记"来自 dsh 弹窗的 API Key"的前缀（与一键发送结果区分）。 */
         const val APIKEY_PREFIX = "__apikey__"
@@ -670,7 +670,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
     private fun showNotification(content: String) {
         com.intellij.notification.Notifications.Bus.notify(
             com.intellij.notification.Notification(
-                "DeepSeek Harness",
+                "DSH Simple",
                 "",
                 content,
                 com.intellij.notification.NotificationType.INFORMATION,
@@ -920,6 +920,12 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         if (vf != null && !vf!!.isDirectory) {
             val editors = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(vf!!, true)
             LOG.info("openFileInEditor: openFile called for ${vf?.path}, editors=${editors.size}")
+            // 聊天点开新文件后同步刷新项目树，使其立即出现在 Project View（新增文件的目录也要展开可见）
+            try {
+                com.intellij.ide.projectView.ProjectView.getInstance(project).refresh()
+            } catch (_: Exception) {
+                LOG.warn("openFileInEditor: failed to refresh project view for ${vf?.path}")
+            }
         } else {
             LOG.warn("openFileInEditor: file not found for rawPath=$rawPath (base=$base)")
         }
@@ -1111,7 +1117,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
     private fun notifyCrash() {
         com.intellij.notification.Notifications.Bus.notify(
             com.intellij.notification.Notification(
-                "DeepSeek Harness",
+                "DSH Simple",
                 DshBundle.message("crash.title"),
                 DshBundle.message("crash.autoRestarting"),
                 com.intellij.notification.NotificationType.WARNING,

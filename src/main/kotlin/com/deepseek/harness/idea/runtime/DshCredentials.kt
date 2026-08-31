@@ -3,6 +3,7 @@ package com.deepseek.harness.idea.runtime
 import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.ide.passwordSafe.PasswordSafe
 import com.intellij.openapi.application.ApplicationManager
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -38,6 +39,43 @@ object DshCredentials {
                 if (idx < 0) null else line.substring(idx + 1).trim().trim('"').trim('\'')
             }
             .firstOrNull { it.isNotEmpty() }
+    }
+
+    /**
+     * 读取凭据文件的**全部 refs**（不只是 DEEPSEEK_API_KEY）为 key -> value 映射。
+     *
+     * 兼容两种格式：插件旧式平铺（`DEEPSEEK_API_KEY: sk-...`）与 dsh 原生
+     * （`version: 1` + `refs:` + 缩进条目如 `  MINIMAX_CN_API_KEY: sk-...`）。
+     * 第三方 provider（llm-pi-ai）的 API key 以 apiKeyEnv 引用的名字（MINIMAX_CN_API_KEY、
+     * AIYUNROUTER_API_KEY）存在 refs: 下，必须一并读写，否则 Web UI 配的 pi key 会被丢弃。
+     */
+    fun readAllRefs(file: Path): Map<String, String> {
+        if (!Files.isReadable(file)) return emptyMap()
+        val refs = LinkedHashMap<String, String>()
+        for (raw in Files.readAllLines(file)) {
+            val line = raw.trim()
+            if (line.isBlank() || line.startsWith("#")) continue
+            val idx = line.indexOf(':')
+            if (idx <= 0) continue
+            val key = line.substring(0, idx).trim()
+            val value = line.substring(idx + 1).trim().trim('"').trim('\'')
+            if (key.isEmpty() || value.isEmpty()) continue
+            if (key.equals("version", true) || key.equals("refs", true)) continue
+            refs[key] = value
+        }
+        return refs
+    }
+
+    /** 把全部 refs 以 dsh 原生 version: 1 / refs: 格式写回凭据文件（幂等）。 */
+    fun writeRefs(file: Path, refs: Map<String, String>) {
+        if (refs.isEmpty()) {
+            Files.deleteIfExists(file)
+            return
+        }
+        Files.createDirectories(file.parent)
+        val sb = StringBuilder("version: 1\nrefs:\n")
+        for ((k, v) in refs) sb.append("  ").append(k).append(": ").append(v).append('\n')
+        Files.writeString(file, sb.toString(), StandardCharsets.UTF_8)
     }
 
     /**

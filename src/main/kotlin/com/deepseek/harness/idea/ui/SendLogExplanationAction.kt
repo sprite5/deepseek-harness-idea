@@ -66,7 +66,7 @@ class SendLogExplanationAction : AnAction(DshBundle.message("action.sendLogExpla
     private fun notify(project: Project, content: String) {
         com.intellij.notification.Notifications.Bus.notify(
             com.intellij.notification.Notification(
-                "DeepSeek Harness",
+                "DSH Simple",
                 "",
                 content,
                 com.intellij.notification.NotificationType.INFORMATION,

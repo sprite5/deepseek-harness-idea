@@ -80,30 +80,33 @@ class DshCredentialsSync(private val projectCredFile: Path) : AutoCloseable {
         }
     }
 
-    /** 子项目 `.credentials.yaml` 变化：解析 key，与全局真源不一致则回写 PasswordSafe + 全局。 */
+    /**
+     * 子项目 `.credentials.yaml` 变化：把**全部 refs**（含第三方 pi provider 的
+     * MINIMAX_CN_API_KEY / AIYUNROUTER_API_KEY 等）合并回写全局真源 + PasswordSafe。
+     *
+     * 旧实现只回写 DEEPSEEK_API_KEY，pi 的 apiKeyEnv 引用在每次重开时被
+     * ensureHome 用全局（只有 DEEPSEEK）覆盖掉，导致反复提示重新输入密钥。
+     * 现在：项目文件的所有 refs 与全局合并（项目值优先），DEEPSEEK_API_KEY 另同步 PasswordSafe。
+     */
     internal fun onFileChanged() {
-        val projectKey = DshCredentials.readApiKeyFromCredentialFile(projectCredFile) ?: return
+        val projectRefs = DshCredentials.readAllRefs(projectCredFile)
+        if (projectRefs.isEmpty()) return
         val globalCred = DshHomeManager.getInstance().globalConfigHome().resolve(".credentials.yaml")
-        val globalKey = DshCredentials.readApiKeyFromCredentialFile(globalCred)
-        if (projectKey == globalKey) return // 一致 → 无需回写，避免无谓循环
-
-        // 回写全局（PasswordSafe + 全局真源），供其它项目下次启动/重启使用。
-        DshCredentials.writeApiKey(projectKey)
-        writeGlobalCredential(globalCred, projectKey)
-        LOG.info("dsh Web UI updated API key; synced to global (PasswordSafe + ${globalCred.fileName})")
-    }
-
-    private fun writeGlobalCredential(globalCred: Path, key: String) {
-        try {
-            Files.createDirectories(globalCred.parent)
-            Files.writeString(
-                globalCred,
-                "DEEPSEEK_API_KEY: $key\n",
-                java.nio.charset.StandardCharsets.UTF_8
-            )
-        } catch (e: Exception) {
-            LOG.warn("failed to write global credential $globalCred", e)
+        val globalRefs = DshCredentials.readAllRefs(globalCred)
+        // 合并：全局已有 + 项目全部（项目值优先，视为本次改动最新）
+        val merged = LinkedHashMap<String, String>(globalRefs)
+        var changed = false
+        for ((k, v) in projectRefs) {
+            if (merged[k] != v) changed = true
+            merged[k] = v
         }
+        // DEEPSEEK_API_KEY 同步到 PasswordSafe（设置页真源）
+        projectRefs[DshCredentials.DEEPSEEK_API_KEY]?.let { key ->
+            if (key != DshCredentials.readApiKey()) DshCredentials.writeApiKey(key)
+        }
+        if (!changed && merged == globalRefs) return // 一致 → 无需写回
+        DshCredentials.writeRefs(globalCred, merged)
+        LOG.info("dsh updated credentials (refs=${merged.keys}); synced to global ${projectRefs.keys}")
     }
 
     /** 纯逻辑（可单测）：比较项目 key 与全局 key，不同则返回应回写，否则返回 null。 */
