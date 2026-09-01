@@ -32,10 +32,9 @@
   保持 DSH 默认（不改动其镜像/光标逻辑，避免字距与高度错乱）。
 - **配置同步**：多项目环境下的凭据与第三方 LLM 配置跨项目双向同步。在任意项目的 Web UI（Models / Settings）
   中添加、修改第三方 Provider（`llm-pi-ai`）或 API Key，文件监听器会自动回写到全局真源，新开/其他项目无需重复配置即可直接共享。
-- **第三方 Provider API Key 配置**（v0.1.7+）：`Settings → Tools → DeepSeek Harness` 现在提供一个
-  "Third-party API keys" 折叠区，可直接配置 `MINIMAX_CN_API_KEY`、`AIYUNROUTER_API_KEY` 等内置预设
-  以及任意自定义 provider 的 key；修改会写入全局 `.credentials.yaml` 的 `refs:` 下，与项目级配置
-  双向同步。
+- **第三方 Provider API Key 设置页**（v0.1.7+）：`Settings → Tools → DeepSeek Harness` 新增 "Third-party API keys" 折叠区，
+  可直接配 `MINIMAX_CN_API_KEY` / `AIYUNROUTER_API_KEY` 等内置预设，以及任意自定义 provider 的 key，
+  无需跳到 DSH Web UI 填写。
 - **其它**：每项目独立工作区隔离、旧会话与投影缓存升级迁移、API Key 脱敏回显。
 
 ## 功能 / Features
@@ -65,36 +64,33 @@
 - **最低**：2024.1（build 241）
 - **最高**：2026.2（build 262.*）
 
-### 运行前置条件 / Runtime Prerequisites
-
-插件首次启动时会调用系统 `node` 解压并启动内嵌的 dsh 树，所以**系统必须已经安装 Node.js**：
-
-- **Node.js** ≥ 18.x（LTS 20 / 22 推荐）
-- 安装方法：[Node.js 官网](https://nodejs.org/zh-cn/download)（Windows / macOS 一键安装）或 `apt install nodejs` / `nvm`（Linux）
-
-验证：
-
-```bash
-node --version   # 应 >= v18.0.0
-```
-
 ## 安装 / Install
+
+### 1. 装插件
 
 1. 从 [Releases](../../releases) 页面下载最新的 `dsh-idea-simple-universal-<version>.zip`（约 90-100 MB）。
 2. `Settings → Plugins → ⚙ → Install Plugin from Disk…` 选择该 zip，重启 IDE。
 3. 打开右侧 **DeepSeek Harness** 工具窗口（首次会自动解压内嵌运行时，可能需要 10-30 秒）。
-4. `Settings → Tools → DeepSeek Harness` 填入 DeepSeek API Key（必填），如有需要再展开
-   "Third-party API keys" 区填入第三方 provider key（可选）。
-5. 开始对话。
 
-### 第三方 API Key / Third-party API Keys
+### 2. 装 Node.js
 
-`Settings → Tools → DeepSeek Harness` 提供 **Third-party API keys** 折叠区：
+插件首次启动时会调用系统 `node` 解压并启动内嵌的 dsh 树，所以**系统必须已经装 Node.js**。
 
-- **预设 provider**：`MINIMAX_CN`、`AIYUNROUTER`（点击下拉选择）
-- **自定义 provider**：选择 `(custom)` 后填入名字（如 `OPENAI_API_KEY`）和 key
-- 存储于全局 `~/.config/dsh-idea/dsh-home/.credentials.yaml` 的 `refs:` 节，与项目级配置双向同步
-- 脱敏回显：显示前 6 位 + `******` + 后 6 位，不暴露完整 key
+请先在终端确认：
+
+```bash
+node --version
+```
+
+要求 **>= v18**。版本不符/没装：[Node.js 官网](https://nodejs.org/zh-cn/download) 下载 LTS（20 / 22）一键安装。
+
+### 3. 配 API Key
+
+`Settings → Tools → DeepSeek Harness`：
+
+- **DeepSeek API Key**（必填）：填入后 Apply
+- **Third-party API keys**（可选）：展开折叠区，配置 `MINIMAX_CN_API_KEY` / `AIYUNROUTER_API_KEY` 等
+  第三方 provider key；修改写入全局 `.credentials.yaml`，跨项目共享（项目级文件由监听器自动同步）
 
 ## 文档 / Docs
 

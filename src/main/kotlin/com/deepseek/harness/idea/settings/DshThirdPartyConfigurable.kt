@@ -3,7 +3,6 @@ package com.deepseek.harness.idea.settings
 import com.deepseek.harness.idea.i18n.DshBundle
 import com.deepseek.harness.idea.runtime.DshCredentials
 import com.deepseek.harness.idea.runtime.DshHomeManager
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.ToolbarDecorator
@@ -12,15 +11,18 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.ui.components.panels.VerticalLayout
 import com.intellij.util.ui.FormBuilder
 import java.awt.BorderLayout
+import javax.swing.DefaultComboBoxModel
 import javax.swing.JComponent
 import javax.swing.JPanel
-import javax.swing.DefaultComboBoxModel
 
 /**
- * 第三方 Provider API Key 配置面板（Settings → Tools → DeepSeek Harness 顶部子区）。
+ * 第三方 Provider API Key 配置面板（Settings → Tools → DeepSeek Harness 折叠区）。
  *
  * 存储：与 DEEPSEEK_API_KEY 共用全局 .credentials.yaml 的 refs: 节。
- * Apply 时调 DshHomeManager.syncCredentialsAll 推送到各项目 DSH_HOME。
+ *
+ * 跨项目同步：由 [DshCredentialsSync] 自动处理 —— 它监听**子项目** .credentials.yaml
+ * 变更并回写到全局 + PasswordSafe；本 UI 直接改全局真源，运行中的项目下次启动 / 关闭重开会
+ * 拿到新值，无需 UI 主动推。
  */
 class DshThirdPartyConfigurable : Configurable {
 
@@ -165,10 +167,6 @@ class DshThirdPartyConfigurable : Configurable {
         if (deepseekKey != null) finalRefs[DshCredentials.DEEPSEEK_API_KEY] = deepseekKey
         finalRefs.putAll(newRefs)
         DshCredentials.writeRefs(credFile, finalRefs)
-
-        ApplicationManager.getApplication().executeOnPooledThread {
-            DshHomeManager.getInstance().syncCredentialsAll()
-        }
 
         state.thirdPartyProviderNames = newNames
 
