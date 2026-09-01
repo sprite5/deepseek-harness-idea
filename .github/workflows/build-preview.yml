@@ -90,7 +90,7 @@ jobs:
 
   release:
     name: publish release (tag only)
-    if: startsWith(github.ref, 'refs/tags/v0.1.7-preview')
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-preview')
     needs: build
     runs-on: ubuntu-22.04
     permissions:
