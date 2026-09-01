@@ -46,6 +46,9 @@ jobs:
             --hanui-version "${{ env.HANUI_VERSION }}" \
             --bundle
 
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
       - name: Build plugin zip
         run: ./gradlew buildPlugin --no-daemon
 
