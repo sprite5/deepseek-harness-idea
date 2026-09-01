@@ -82,8 +82,8 @@ async function main() {
     fs.writeFileSync(path.join(dshDir, 'package.json'), JSON.stringify(pkg, null, 2));
 
     // 不传 --os/--cpu，让 npm 把 sharp/koffi/node-addon-require-builtin/node-pty 的
-    // 所有平台变体都装上。--include=optional 确保 optionalDependencies 不会被跳过。
-    // 不传 --include=optional 给 corepack/npm 新版；通过环境变量 NPM_CONFIG_INCLUDE=optional 设置。
+    // 所有平台变体都装上。通过环境变量 NPM_CONFIG_INCLUDE=optional 确保 optionalDependencies 不被跳过。
+    // shell:true 让 spawnSync 通过 shell 解析 npm/npm.cmd（PATHEXT 等价）；Windows 路径/空格也安全。
     const env = { ...process.env, NPM_CONFIG_INCLUDE: 'optional' };
     const npmArgs = [
       'install',
@@ -92,7 +92,8 @@ async function main() {
       '--cache', cacheDir,
       '--registry', registry,
     ];
-    sh(npmCmd, npmArgs, { cwd: dshDir, env });
+    const r = spawnSync(npmCmd, npmArgs, { cwd: dshDir, env, stdio: 'inherit', shell: true });
+    if (r.status !== 0) throw new Error(`npm install failed (exit ${r.status})`);
 
     if (!fs.existsSync(dshBin)) throw new Error(`dsh bin missing after install: ${dshBin}`);
     if (!fs.existsSync(hanuiPkg)) throw new Error(`dsh-mobile-hanui missing after install: ${hanuiPkg}`);
