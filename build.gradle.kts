@@ -18,7 +18,7 @@ repositories {
 
 val platformVersion: String = providers.gradleProperty("platformVersion").getOrElse("2024.1.7")
 
-// 当前主机平台（用于挑对应的 dsh-bundle 打进插件资源；每 zip 自包含一个平台的 dsh 树，node 不打包）
+// 当前主机平台（仅日志用；v0.1.7 universal zip 已覆盖所有 OS/arch，主机不再决定产物分支）
 val hostOs: String = when {
     System.getProperty("os.name").lowercase().contains("win") -> "win"
     System.getProperty("os.name").lowercase().contains("mac") || System.getProperty("os.name").lowercase().contains("darwin") -> "macos"
@@ -97,13 +97,15 @@ tasks {
         useJUnitPlatform()
     }
 
-    // Step 2：构建 dsh 树（scripts/build-dsh.mjs；不含 node，运行时用系统 node）。输出 build/dsh-<hostOs>-<hostArch>.zip。
+    // Step 2：构建 universal dsh 树（scripts/build-dsh.mjs；不含 node，运行时用系统 node）。
+    // 单一 zip 覆盖 win-x64/arm64 + macos-x64/arm64 + linux-x64/arm64 全平台用户；
+    // 运行时由 process.platform/arch 选对应 native（见 Platform.kt）。
     register("buildDsh", Exec::class) {
-        description = "Build the dsh tree (@deepseek-ai/dsh + dsh-mobile-hanui) for the host platform; no node bundled"
+        description = "Build the universal dsh tree (@deepseek-ai/dsh + dsh-mobile-hanui); no node bundled; covers all OS/arch"
         group = "build"
         val script = rootProject.file("scripts/build-dsh.mjs")
-        val outputDir = rootProject.file("build/dsh-${hostOs}-${hostArch}")
-        val bundleZip = rootProject.file("build/dsh-${hostOs}-${hostArch}.zip")
+        val outputDir = rootProject.file("build/dsh")
+        val bundleZip = rootProject.file("build/dsh-universal.zip")
         inputs.file(script)
         outputs.dir(outputDir)
         outputs.file(bundleZip)
@@ -114,13 +116,13 @@ tasks {
         )
     }
 
-    // Step 5：把主机平台的 dsh zip 打进插件资源（重命名为 dsh-bundle.zip，由 DshHomeManager.DSH_BUNDLE_RESOURCE 读取）。
-    // 先清空 plugin-runtime/ 旧残留（如上一版的 runtime-bundle.zip），避免被 sourceSets 一并打入新插件造成体积膨胀。
+    // Step 5：把 universal dsh zip 打进插件资源（重命名为 dsh-bundle.zip，由 DshHomeManager.DSH_BUNDLE_RESOURCE 读取）。
+    // 先清空 plugin-runtime/ 旧残留（如上一版的 runtime-bundle.zip / dsh-<os>-<arch>.zip），避免被 sourceSets 一并打入新插件造成体积膨胀。
     register("bundleDsh", Copy::class) {
-        description = "Package the built dsh tree as dsh-bundle.zip into plugin resources (per host platform)"
+        description = "Package the universal dsh tree as dsh-bundle.zip into plugin resources (any host: win/macos/linux)"
         group = "build"
-        // 若已有 build/dsh-<hostOs>-<hostArch>.zip，直接复用既有离线包，避免每次全量 buildDsh 联网
-        val bundle = rootProject.file("build/dsh-${hostOs}-${hostArch}.zip")
+        // 若已有 build/dsh-universal.zip，直接复用既有离线包，避免每次全量 buildDsh 联网
+        val bundle = rootProject.file("build/dsh-universal.zip")
         if (!bundle.exists()) {
             dependsOn("buildDsh")
         }

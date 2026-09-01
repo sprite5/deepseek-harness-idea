@@ -1,16 +1,19 @@
-# v0.1.7 preview CI：3 个平台 runner 各构建一个自包含插件 zip（仅 dsh 树，无 node），
-# 附到 GitHub Release（prerelease）。
+# v0.1.7 preview CI：单 ubuntu runner 构建单一 universal 插件 zip，覆盖
+# win-x64/win-arm64 + macos-x64/macos-arm64 + linux-x64/linux-arm64 全平台用户。
+#
+# 为什么用 ubuntu（不用 mac / win）：
+#   - npm install 大型依赖树（dsh ~190 包 + 6 套 native prebuild）时
+#     ubuntu-22.04 Linux 容器最稳、最快、sharp/koffi 全平台预编译都有。
+#   - macos runner 上 npm 偶尔挂 optional dep 解析、symlink/权限怪事较多。
+#   - 单 runner → 单 zip → 单 Release：CI 资源与维护成本最低。
 #
 # 触发：
-#   - push branch `preview/**`     → 构建 + 上传 artifact（不打 Release）
-#   - push tag `v0.1.7-preview.*`  → 构建 + 上传 artifact + 创建 prerelease
-#   - workflow_dispatch            → 手动触发（测试用）
+#   - push branch `preview/**`    → 构建 + 上传 artifact（不打 Release）
+#   - push tag `v0.1.7-preview.*` → 构建 + 上传 artifact + 创建 prerelease
+#   - workflow_dispatch           → 手动触发（测试用）
 #
-# 平台矩阵（v0.1.7 preview）：win-x64 / macos-arm64 / linux-x64
-# macos-x64 暂不出（Intel Mac 小众；后续按需加 macos-13 runner）
-#
-# 每平台产物：build/distributions/dsh-idea-simple-<host>-<ver>.zip
-# 体积 ~50-60MB（仅 dsh 树 + Kotlin 类，不含 node）
+# 产物：build/distributions/dsh-idea-simple-universal-<ver>.zip（约 90-100 MB）
+# 体积比单平台大（含 6 套 native prebuild），但任何 OS/arch 用户都能直接装。
 name: Build Preview
 
 on:
@@ -33,28 +36,9 @@ env:
 
 jobs:
   build:
-    name: build/${{ matrix.osid }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: windows-latest
-            os: win32
-            arch: x64
-            osid: win-x64
-            gradle: .\gradlew.bat
-          - runner: macos-14
-            os: darwin
-            arch: arm64
-            osid: macos-arm64
-            gradle: ./gradlew
-          - runner: ubuntu-22.04
-            os: linux
-            arch: x64
-            osid: linux-x64
-            gradle: ./gradlew
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    name: build/universal
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -67,30 +51,28 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      # 1) 构建 dsh 树（不含 node）；--os/--arch 显式声明目标平台，让 npm 解析正确 optionalDependencies
-      - name: Build dsh tree (no node bundled)
-        shell: bash
+      # 1) 构建 universal dsh 树（不含 node；npm install 不传 --os/--cpu，
+      #    让 sharp/koffi/node-addon-require-builtin/node-pty 全平台 prebuild 都装上）
+      - name: Build dsh tree (universal, no node bundled)
         env:
           NPM_CONFIG_FETCH_TIMEOUT: '120000'
           NPM_CONFIG_FETCH_RETRIES: '3'
           NPM_CONFIG_LOGLEVEL: 'warn'
         run: |
           node scripts/build-dsh.mjs \
-            --os ${{ matrix.os }} \
-            --arch ${{ matrix.arch }} \
             --registry "${{ env.NPM_REGISTRY }}" \
             --dsh-version "${{ env.DSH_VERSION }}" \
             --hanui-version "${{ env.HANUI_VERSION }}" \
             --bundle
 
-      # 2) 打包插件 zip（bundleDsh 把 build/dsh-<os>-<arch>.zip 重命名 dsh-bundle.zip 打进资源）
+      # 2) 打包插件 zip（bundleDsh 把 build/dsh.zip 重命名为 dsh-bundle.zip 打进资源）
       - name: Build plugin zip
-        run: ${{ matrix.gradle }} buildPlugin --no-daemon
+        run: ./gradlew buildPlugin --no-daemon
 
-      # 3) 上传产物（release job 在 tag 推送时下载所有平台产物一起附到 Release）
+      # 3) 上传产物（tag 推送时由 release job 下载附到 Release）
       - uses: actions/upload-artifact@v4
         with:
-          name: plugin-${{ matrix.osid }}
+          name: plugin-universal
           path: build/distributions/*.zip
           if-no-files-found: error
           retention-days: 60

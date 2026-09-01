@@ -3,10 +3,11 @@ package com.deepseek.harness.idea.runtime
 /**
  * 主机平台探测（os + arch）。所有平台判断集中在这一处。
  *
- * - `.id` 用作按平台资源后缀（`dsh-bundle-win-x64.zip` 等，见 build.gradle.kts bundleDsh）。
+ * - v0.1.7 起 universal dsh zip 覆盖全平台，运行时由 `process.platform/arch`
+ 选对应 native（sharp/koffi/node-addon-require-builtin/node-pty 都按 OS×arch
+ 各自装上变体，npm 按 process 平台加载对应 .node）。
  * - `.nodeBinName` 返回系统 node 可执行文件名（Windows=`node.exe`；Unix=`node`）。
- *
- * 运行时不再打包 node，node 由宿主系统提供——只需用文件名判断怎么在 PATH 上找它。
+ * - 运行时不再打包 node，node 由宿主系统提供——只需用文件名判断怎么在 PATH 上找它。
  */
 object Platform {
 
