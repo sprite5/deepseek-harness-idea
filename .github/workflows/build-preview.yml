@@ -14,7 +14,6 @@ permissions:
 env:
   # Node 20 已被 GitHub Actions 弃用 (2025-09-19)，现在默认是 Node 24
   # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
-  NODE_VERSION: '24'
   JAVA_VERSION: '21'
   NPM_REGISTRY: 'https://registry.npmmirror.com/'
   DSH_VERSION: '0.1.1-rc.2'
@@ -29,8 +28,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
 
       - uses: actions/setup-java@v4
         with:
