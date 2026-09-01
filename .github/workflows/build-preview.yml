@@ -31,8 +31,8 @@ jobs:
         run: |
           echo "Detecting runner location..."
           RESPONSE=$(curl -s https://ip-api.com/json/ --connect-timeout 5)
-          echo "Response: $RESPONSE"
-          COUNTRY=$(echo "$RESPONSE" | grep -oP '"'"'countryCode":s*"K[^"]+'"'"')
+          echo "Response received"
+          COUNTRY=$(echo "$RESPONSE" | sed -n 's/.*"countryCode":"\([^"]*\)".*/\1/p')
           echo "Runner country: $COUNTRY"
           if [ "$COUNTRY" = "CN" ]; then
             echo "Using official npm registry (faster in China)"
