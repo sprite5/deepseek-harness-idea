@@ -1,4 +1,3 @@
-# v0.1.7 preview CI
 name: Build Preview
 
 on:
@@ -27,10 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 自动检测是否在国内，选择最优 npm 源
       - name: Detect optimal npm registry
         run: |
           echo "Detecting runner location..."
-          COUNTRY=$(curl -s https://ip-api.com/json/ --connect-timeout 5 | grep -o '"'"'"countryCode":"[^"]*"'"'"' | cut -d'"'"'"'"'"' -f4)
+          RESPONSE=$(curl -s https://ip-api.com/json/ --connect-timeout 5)
+          echo "Response: $RESPONSE"
+          COUNTRY=$(echo "$RESPONSE" | grep -oP '"'"'countryCode":s*"K[^"]+'"'"')
           echo "Runner country: $COUNTRY"
           if [ "$COUNTRY" = "CN" ]; then
             echo "Using official npm registry (faster in China)"
@@ -39,7 +41,6 @@ jobs:
             echo "Using npmmirror registry"
             echo "NPM_REGISTRY=https://registry.npmmirror.com/" >> $GITHUB_ENV
           fi
-          echo "NPM_REGISTRY is now: $NPM_REGISTRY"
 
       - uses: actions/setup-node@v4
         with:
