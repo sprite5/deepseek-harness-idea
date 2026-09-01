@@ -1,0 +1,108 @@
+name: Build Preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'preview/**'
+    tags:
+      - 'v0.1.7-preview.*'
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: '21'
+  NPM_REGISTRY: 'https://registry.npmmirror.com/'
+  DSH_VERSION: '0.1.1-rc.2'
+  HANUI_VERSION: '0.2.5'
+
+jobs:
+  build:
+    name: build/universal
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # 缓存 dsh 基础树（~190 JS 包 + 18 native prebuild tarballs）
+      # 版本变才失效，否则全量命中
+      - name: Cache dsh tree
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/dsh
+            build/pack-cache
+          key: dsh-tree-${{ env.DSH_VERSION }}-${{ env.HANUI_VERSION }}
+          restore-keys: |
+            dsh-tree-${{ env.DSH_VERSION }}-
+            dsh-tree-
+
+      - uses: actions/setup-node@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # 先用 prepare 脚本装 dsh 基础树（命中缓存秒过；未命中跑 npm install 到 build/dsh/dsh/）
+      # 这样 build-dsh.mjs 的 Stage 1 会复用现有 tree，跳过它自己的 npm install fallback
+      - name: Prepare dsh base tree
+        run: |
+          node scripts/prepare-dsh-cache.mjs \
+            --registry "${{ env.NPM_REGISTRY }}" \
+            --dsh-version "${{ env.DSH_VERSION }}" \
+            --hanui-version "${{ env.HANUI_VERSION }}"
+
+      # build-dsh.mjs 主要做 native prebuild 补齐（Stage 2）+ 打 zip（Stage 4）
+      # Stage 1 看到 build/dsh/dsh/ 已存在会直接跳过
+      - name: Build dsh tree + bundle zip
+        env:
+          NPM_CONFIG_FETCH_TIMEOUT: '120000'
+          NPM_CONFIG_FETCH_RETRIES: '3'
+          NPM_CONFIG_LOGLEVEL: 'warn'
+        run: |
+          node scripts/build-dsh.mjs \
+            --registry "${{ env.NPM_REGISTRY }}" \
+            --dsh-version "${{ env.DSH_VERSION }}" \
+            --hanui-version "${{ env.HANUI_VERSION }}" \
+            --bundle
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build plugin zip
+        run: ./gradlew buildPlugin --no-daemon
+
+      # buildPlugin 产物名是 <plugin-name>-<version>.zip；改名为 universal
+      - name: Rename zip to universal
+        run: |
+          cd build/distributions
+          mv dsh-idea-simple-*.zip dsh-idea-simple-universal-0.1.7.zip
+          ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-universal
+          path: build/distributions/*.zip
+          if-no-files-found: error
+          retention-days: 60
+
+  release:
+    name: publish release (tag only)
+    if: startsWith(github.ref, 'refs/tags/v0.1.7-preview')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true
+          prerelease: true
