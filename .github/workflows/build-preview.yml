@@ -1,19 +1,4 @@
-# v0.1.7 preview CI：单 ubuntu runner 构建单一 universal 插件 zip，覆盖
-# win-x64/win-arm64 + macos-x64/macos-arm64 + linux-x64/linux-arm64 全平台用户。
-#
-# 为什么用 ubuntu（不用 mac / win）：
-#   - npm install 大型依赖树（dsh ~190 包 + 6 套 native prebuild）时
-#     ubuntu-22.04 Linux 容器最稳、最快、sharp/koffi 全平台预编译都有。
-#   - macos runner 上 npm 偶尔挂 optional dep 解析、symlink/权限怪事较多。
-#   - 单 runner → 单 zip → 单 Release：CI 资源与维护成本最低。
-#
-# 触发：
-#   - push branch `preview/**`    → 构建 + 上传 artifact（不打 Release）
-#   - push tag `v0.1.7-preview.*` → 构建 + 上传 artifact + 创建 prerelease
-#   - workflow_dispatch           → 手动触发（测试用）
-#
-# 产物：build/distributions/dsh-idea-simple-universal-<ver>.zip（约 90-100 MB）
-# 体积比单平台大（含 6 套 native prebuild），但任何 OS/arch 用户都能直接装。
+# v0.1.7 preview CI
 name: Build Preview
 
 on:
@@ -42,6 +27,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Detect optimal npm registry
+        run: |
+          echo "Detecting runner location..."
+          COUNTRY=$(curl -s https://ip-api.com/json/ --connect-timeout 5 | grep -o '"'"'"countryCode":"[^"]*"'"'"' | cut -d'"'"'"'"'"' -f4)
+          echo "Runner country: $COUNTRY"
+          if [ "$COUNTRY" = "CN" ]; then
+            echo "Using official npm registry (faster in China)"
+            echo "NPM_REGISTRY=https://registry.npmjs.org/" >> $GITHUB_ENV
+          else
+            echo "Using npmmirror registry"
+            echo "NPM_REGISTRY=https://registry.npmmirror.com/" >> $GITHUB_ENV
+          fi
+          echo "NPM_REGISTRY is now: $NPM_REGISTRY"
+
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -51,8 +50,6 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      # 1) 构建 universal dsh 树（不含 node；npm install 不传 --os/--cpu，
-      #    让 sharp/koffi/node-addon-require-builtin/node-pty 全平台 prebuild 都装上）
       - name: Build dsh tree (universal, no node bundled)
         env:
           NPM_CONFIG_FETCH_TIMEOUT: '120000'
@@ -65,11 +62,9 @@ jobs:
             --hanui-version "${{ env.HANUI_VERSION }}" \
             --bundle
 
-      # 2) 打包插件 zip（bundleDsh 把 build/dsh.zip 重命名为 dsh-bundle.zip 打进资源）
       - name: Build plugin zip
         run: ./gradlew buildPlugin --no-daemon
 
-      # 3) 上传产物（tag 推送时由 release job 下载附到 Release）
       - uses: actions/upload-artifact@v4
         with:
           name: plugin-universal
