@@ -6,7 +6,7 @@ on:
     branches:
       - 'preview/**'
     tags:
-      - 'v0.1.7-preview.*'
+      - 'v*'
 
 permissions:
   contents: read
@@ -106,3 +106,4 @@ jobs:
           files: artifacts/**/*.zip
           generate_release_notes: true
           prerelease: true
+
