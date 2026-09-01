@@ -20,8 +20,11 @@ import javax.swing.JComponent
  * [DshHomeManager] 的 DSH_HOME/.credentials.yaml；model/baseUrl 存 [DshSettingsState]。
  *
  * **脱敏回显**：账户字段回显"前 6 位 + ****** + 后 6 位"（绝不显示明文）。用 [JBTextField]（而非
- * [JBPasswordField]）以让脱敏串可被看到；`isModified`/`apply` 用"字段内容 ≠ 当前脱敏串"判定用户是否
+ * [JBPasswordField]）以让脱敏串可被看到；isModified/apply 用"字段内容 ≠ 当前脱敏串"判定用户是否
  * 真的改了 key，从而避免把脱敏串当作真实 key 写回密码库。
+ *
+ * **第三方 Provider 配置**：通过 [DshThirdPartyConfigurable] 提供折叠区；存储在同一个
+ * .credentials.yaml 的 refs: 下，跨项目共享。
  */
 class DshSettingsConfigurable : SearchableConfigurable {
 
@@ -30,8 +33,8 @@ class DshSettingsConfigurable : SearchableConfigurable {
     private var baseUrlField: JBTextField? = null
     private var logLevelCombo: ComboBox<String>? = null
     private var importStatus: JBLabel? = null
+    private var thirdPartyPanel: DshThirdPartyConfigurable? = null
 
-    /** 当前密码库中的真实 API Key（用于 apply 时区分"用户未改"与"用户输入新值"）。 */
     private var storedApiKey: String? = null
 
     override fun getId(): String = "dsh.settings"
@@ -41,10 +44,6 @@ class DshSettingsConfigurable : SearchableConfigurable {
     override fun createComponent(): JComponent {
         val state = DshSettingsState.getInstance()
 
-        // 脱敏回显：显示"前 6 位 + ****** + 后 6 位"；未存 key 则显示空。
-        // 用 JBTextField 让脱敏串可见（JBPasswordField 会把文本渲染成掩码点，用户看不到脱敏串）。
-        // 读取先 PasswordSafe，无则回退到插件全局 DSH_HOME 的 .credentials.yaml（方案A真源）——
-        // PasswordSafe 读不到（如 IDE 密码库未解锁）时仍能反显已在 .credentials.yaml 中的 Key。
         storedApiKey = readStoredApiKey()
         val apiKey = JBTextField().apply {
             text = DshCredentials.maskApiKey(storedApiKey)
@@ -60,7 +59,6 @@ class DshSettingsConfigurable : SearchableConfigurable {
         val baseUrl = JBTextField(state.baseUrl.ifEmpty { "https://api.deepseek.com" }).apply { columns = 40 }
         baseUrlField = baseUrl
 
-        // Step 5 FR-03.5：日志级别（透传 DSH_LOG_LEVEL）
         val logLevels = arrayOf("info", "debug", "warn", "error")
         val logLevel = ComboBox(logLevels).apply {
             selectedItem = logLevels.firstOrNull { it == state.logLevel } ?: "info"
@@ -86,6 +84,10 @@ class DshSettingsConfigurable : SearchableConfigurable {
         val status = JBLabel(" ")
         importStatus = status
 
+        // 第三方 Provider 配置面板（独立 Configurable 实现，复用其 createComponent 返回的 JComponent）
+        thirdPartyPanel = DshThirdPartyConfigurable()
+        val thirdPartyComponent = thirdPartyPanel?.createComponent()
+
         return FormBuilder.createFormBuilder()
             .addLabeledComponent(JBLabel(DshBundle.message("settings.apiKey.label")), apiKey, 1, false)
             .addLabeledComponent(JBLabel(DshBundle.message("settings.model.label")), model, 1, false)
@@ -95,6 +97,10 @@ class DshSettingsConfigurable : SearchableConfigurable {
             .addLabeledComponent(JBLabel(DshBundle.message("settings.logLevel.label")), logLevel, 1, false)
             .addComponent(JBLabel(DshBundle.message("settings.apply.note")))
             .addVerticalGap(8)
+            .addSeparator()
+            .addComponent(JBLabel(DshBundle.message("settings.thirdParty.title")))
+            .addComponent(thirdPartyComponent ?: JBLabel(" "))
+            .addVerticalGap(8)
             .panel
     }
 
@@ -102,11 +108,12 @@ class DshSettingsConfigurable : SearchableConfigurable {
         val state = DshSettingsState.getInstance()
         val model = modelCombo?.selectedItem as? String
         val logLevel = logLevelCombo?.selectedItem as? String
-        return state.model != model || state.baseUrl != baseUrlField?.text?.trim().orEmpty() ||
+        val mainModified = state.model != model || state.baseUrl != baseUrlField?.text?.trim().orEmpty() ||
             state.logLevel != logLevel || apiKeyChanged()
+        val thirdPartyModified = thirdPartyPanel?.isModified() ?: false
+        return mainModified || thirdPartyModified
     }
 
-    /** 用户是否改了 API Key（字段内容 ≠ 当前脱敏回显，即为新值）。 */
     private fun apiKeyChanged(): Boolean {
         val typed = apiKeyField?.text?.trim().orEmpty()
         val mask = DshCredentials.maskApiKey(storedApiKey)
@@ -120,16 +127,17 @@ class DshSettingsConfigurable : SearchableConfigurable {
             ?: "https://api.deepseek.com"
         state.logLevel = logLevelCombo?.selectedItem as? String ?: "info"
 
-        // 仅当用户实际输入了新 key（而非脱敏回显原样）才写回，避免把脱敏串当 key 保存。
         val key = apiKeyField?.text?.trim().orEmpty()
         if (key.isNotEmpty() && key != DshCredentials.maskApiKey(storedApiKey)) {
             DshCredentials.writeApiKey(key)
             storedApiKey = key
-            // 同步写入各项目 DSH_HOME 凭据文件（按项目隔离，v0.1.3-dev；运行中的会话需重启生效）
             ApplicationManager.getApplication().executeOnPooledThread {
                 DshHomeManager.getInstance().syncCredentialsAll()
             }
         }
+
+        // 第三方 provider 配置：apply 时调内部 panel 的 apply
+        thirdPartyPanel?.apply()
     }
 
     override fun reset() {
@@ -140,12 +148,9 @@ class DshSettingsConfigurable : SearchableConfigurable {
         storedApiKey = readStoredApiKey()
         apiKeyField?.text = DshCredentials.maskApiKey(storedApiKey)
         importStatus?.text = " "
+        thirdPartyPanel?.reset()
     }
 
-    /**
-     * 读取当前真实的 API Key：先 PasswordSafe，回退到插件全局 DSH_HOME 的 `.credentials.yaml`。
-     * 返回的 Key 用于 apply 时区分"用户未改"与"输入新值"，避免把脱敏串当真实 key 写回。
-     */
     private fun readStoredApiKey(): String? {
         val globalCredFile = DshHomeManager.getInstance().globalConfigHome().resolve(".credentials.yaml")
         return DshCredentials.readApiKeyWithFallback(globalCredFile)
