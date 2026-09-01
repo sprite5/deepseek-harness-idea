@@ -54,10 +54,11 @@ function sh(cmd, argsArr, opts = {}) {
   if (r.status !== 0) throw new Error(`command failed (exit ${r.status}): ${cmd} ${argsArr.join(' ')}`);
 }
 
-// 系统 node 自带的 npm（系统 node 仅用于本构建脚本，不会被打进产物）。
+// 系统 node 仅用于本构建脚本，不会被打进产物。npm 由 PATH 提供（系统/容器/CI 的
+// actions/setup-node 都把 npm 装到 PATH；不要硬编 node_modules/npm/bin/npm-cli.js，
+// 那条路径在 GitHub Actions 上不存在）。
 const nodeExe = process.execPath;
-const npmCli = path.join(path.dirname(nodeExe), 'node_modules', 'npm', 'bin', 'npm-cli.js');
-if (!fs.existsSync(npmCli)) throw new Error(`system npm-cli.js not found: ${npmCli}（本脚本需系统 node 与其内置 npm）`);
+const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 async function main() {
   log(`DSH tree build (universal, no node): @deepseek-ai/dsh@${dshVersion} + dsh-mobile-hanui@${hanuiVersion} -> ${output}`);
@@ -82,15 +83,16 @@ async function main() {
 
     // 不传 --os/--cpu，让 npm 把 sharp/koffi/node-addon-require-builtin/node-pty 的
     // 所有平台变体都装上。--include=optional 确保 optionalDependencies 不会被跳过。
+    // 不传 --include=optional 给 corepack/npm 新版；通过环境变量 NPM_CONFIG_INCLUDE=optional 设置。
+    const env = { ...process.env, NPM_CONFIG_INCLUDE: 'optional' };
     const npmArgs = [
-      npmCli, 'install',
+      'install',
       '--ignore-scripts', // 不跑 postinstall；sharp/koffi 取预编译二进制
       '--no-audit', '--no-fund',
-      '--include=optional',
       '--cache', cacheDir,
       '--registry', registry,
     ];
-    sh(nodeExe, npmArgs, { cwd: dshDir });
+    sh(npmCmd, npmArgs, { cwd: dshDir, env });
 
     if (!fs.existsSync(dshBin)) throw new Error(`dsh bin missing after install: ${dshBin}`);
     if (!fs.existsSync(hanuiPkg)) throw new Error(`dsh-mobile-hanui missing after install: ${hanuiPkg}`);
