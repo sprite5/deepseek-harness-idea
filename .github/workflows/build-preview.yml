@@ -25,8 +25,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 缓存 dsh 树（Stage 1 产物）和 pack-cache（Stage 2 下载的 tarballs）
-      # dsh 树依赖 dsh/hanui 版本号，版本变就重新构建
       - name: Cache dsh tree
         uses: actions/cache@v4
         with:
@@ -62,6 +60,14 @@ jobs:
 
       - name: Build plugin zip
         run: ./gradlew buildPlugin --no-daemon
+
+      # buildPlugin 产物名是 <plugin-name>-<version>.zip（这里是 dsh-idea-simple-0.1.7.zip）；
+      # 重命名为 universal 版本以表明跨平台
+      - name: Rename zip to universal
+        run: |
+          cd build/distributions
+          mv dsh-idea-simple-*.zip dsh-idea-simple-universal-0.1.7.zip
+          ls -la
 
       - uses: actions/upload-artifact@v4
         with:
