@@ -12,6 +12,11 @@ plugins {
 group = "com.deepseek.harness"
 version = "0.1.7"
 
+// v0.1.7 起 universal plugin zip（无平台后缀，跨所有 OS/arch）。
+// gradle-intellij-plugin 默认在产物名里追加 host 平台（"-win"/"-macos"/"-linux"），
+// 我们覆盖 archivesName 让产物名始终是 universal。
+project.archivesName.set("dsh-idea-simple-universal")
+
 repositories {
     mavenCentral()
 }
