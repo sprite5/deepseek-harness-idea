@@ -26,22 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 自动检测是否在国内，选择最优 npm 源
-      - name: Detect optimal npm registry
-        run: |
-          echo "Detecting runner location..."
-          RESPONSE=$(curl -s https://ip-api.com/json/ --connect-timeout 5)
-          echo "Response received"
-          COUNTRY=$(echo "$RESPONSE" | sed -n 's/.*"countryCode":"\([^"]*\)".*/\1/p')
-          echo "Runner country: $COUNTRY"
-          if [ "$COUNTRY" = "CN" ]; then
-            echo "Using official npm registry (faster in China)"
-            echo "NPM_REGISTRY=https://registry.npmjs.org/" >> $GITHUB_ENV
-          else
-            echo "Using npmmirror registry"
-            echo "NPM_REGISTRY=https://registry.npmmirror.com/" >> $GITHUB_ENV
-          fi
-
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
