@@ -46,14 +46,14 @@ class WorkspaceInitializerTest {
         assertNull(WorkspaceInitializer.computeBringToFront(listOf("ws-a"), "ws-a"))
     }
 
-    // ---- 链路：create → list → insertBefore ----
+    // ---- 链路：create → insertBefore ----
 
     @Test
     fun `ensureWorkspace posts workspace create rpc`() {
         var receivedPath: String? = null
         var receivedMethod: String? = null
         val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        srv.createContext("/api/workspace.create") { ex ->
+        srv.createContext("/api/workspace/create") { ex ->
             val body = ex.requestBody.readBytes().toString(StandardCharsets.UTF_8)
             receivedPath = Regex(""""path":"([^"]+)"""").find(body)?.groupValues?.get(1)
             receivedMethod = Regex(""""method":"([^"]+)"""").find(body)?.groupValues?.get(1)
@@ -65,7 +65,7 @@ class WorkspaceInitializerTest {
 
         val ok = WorkspaceInitializer.ensureWorkspace("http://127.0.0.1:${srv.address.port}", "D:/proj/MyApp")
         assertTrue(ok, "ensureWorkspace should return true on ok response")
-        assertTrue(receivedMethod == "workspace.create", "should call workspace.create, got $receivedMethod")
+        assertTrue(receivedMethod == "workspace/create", "should call workspace/create, got $receivedMethod")
         assertTrue(receivedPath == "D:/proj/MyApp", "should send project path, got $receivedPath")
     }
 
@@ -74,14 +74,10 @@ class WorkspaceInitializerTest {
         var insertPayload: String? = null
         var listCalls = 0
         val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        srv.createContext("/api/workspace.create") { ex ->
-            respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":true,"value":{"workspace":{"workspaceId":"ws-b","path":"D:/proj/MyApp"},"created":false}}}""")
+        srv.createContext("/api/workspace/create") { ex ->
+            respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":true,"value":{"workspace":{"workspaceId":"ws-b","path":"D:/proj/MyApp"},"workspaceIds":["ws-a","ws-b"],"created":false}}}""")
         }
-        srv.createContext("/api/workspace.list") { ex ->
-            listCalls++
-            respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":true,"value":{"items":[{"workspaceId":"ws-a","path":"D:/old"},{"workspaceId":"ws-b","path":"D:/proj/MyApp"}],"archivedSessionIds":[]}}}""")
-        }
-        srv.createContext("/api/workspace.insertBefore") { ex ->
+        srv.createContext("/api/workspace/insertBefore") { ex ->
             insertPayload = ex.requestBody.readBytes().toString(StandardCharsets.UTF_8)
             respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":true,"value":{"workspaceIds":["ws-b","ws-a"]}}}""")
         }
@@ -91,8 +87,7 @@ class WorkspaceInitializerTest {
 
         val ok = WorkspaceInitializer.ensureWorkspace("http://127.0.0.1:${srv.address.port}", "D:/proj/MyApp")
         assertTrue(ok)
-        assertEquals(1, listCalls, "workspace.list should be called once")
-        assertTrue(insertPayload != null, "workspace.insertBefore should be called")
+        assertTrue(insertPayload != null, "workspace/insertBefore should be called")
         assertTrue(insertPayload!!.contains("\"workspaceId\":\"ws-b\""), "insertBefore should target ws-b, got $insertPayload")
         assertTrue(insertPayload!!.contains("\"beforeWorkspaceId\":\"ws-a\""), "insertBefore should anchor at ws-a, got $insertPayload")
     }
@@ -101,13 +96,10 @@ class WorkspaceInitializerTest {
     fun `ensureWorkspace skips insertBefore when already first`() {
         var insertCalls = 0
         val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        srv.createContext("/api/workspace.create") { ex ->
-            respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":true,"value":{"workspace":{"workspaceId":"ws-b","path":"D:/proj/MyApp"},"created":false}}}""")
+        srv.createContext("/api/workspace/create") { ex ->
+            respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":true,"value":{"workspace":{"workspaceId":"ws-b","path":"D:/proj/MyApp"},"workspaceIds":["ws-b","ws-a"],"created":false}}}""")
         }
-        srv.createContext("/api/workspace.list") { ex ->
-            respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":true,"value":{"items":[{"workspaceId":"ws-b","path":"D:/proj/MyApp"},{"workspaceId":"ws-a","path":"D:/old"}],"archivedSessionIds":[]}}}""")
-        }
-        srv.createContext("/api/workspace.insertBefore") { ex ->
+        srv.createContext("/api/workspace/insertBefore") { ex ->
             insertCalls++
             respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":true,"value":{"workspaceIds":["ws-b","ws-a"]}}}""")
         }
@@ -123,13 +115,10 @@ class WorkspaceInitializerTest {
     @Test
     fun `ensureWorkspace tolerates insertBefore failure`() {
         val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        srv.createContext("/api/workspace.create") { ex ->
-            respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":true,"value":{"workspace":{"workspaceId":"ws-b","path":"D:/proj/MyApp"},"created":false}}}""")
+        srv.createContext("/api/workspace/create") { ex ->
+            respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":true,"value":{"workspace":{"workspaceId":"ws-b","path":"D:/proj/MyApp"},"workspaceIds":["ws-a","ws-b"],"created":false}}}""")
         }
-        srv.createContext("/api/workspace.list") { ex ->
-            respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":true,"value":{"items":[{"workspaceId":"ws-a","path":"D:/old"}],"archivedSessionIds":[]}}}""")
-        }
-        srv.createContext("/api/workspace.insertBefore") { ex ->
+        srv.createContext("/api/workspace/insertBefore") { ex ->
             respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":false,"error":"boom"}}""")
         }
         srv.executor = Executors.newCachedThreadPool()
@@ -144,7 +133,7 @@ class WorkspaceInitializerTest {
     @Test
     fun `ensureWorkspace returns false on http error`() {
         val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        srv.createContext("/api/workspace.create") { ex ->
+        srv.createContext("/api/workspace/create") { ex ->
             respond(ex, """{"type":"server-response","rpcId":"x","result":{"ok":false,"error":"boom"}}""")
         }
         srv.start()

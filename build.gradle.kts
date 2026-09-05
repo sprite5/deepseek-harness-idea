@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.deepseek.harness"
-version = "0.1.8"
+version = "0.1.9"
 
 // v0.1.7 起 universal plugin zip（无平台后缀，跨所有 OS/arch）。
 // gradle-intellij-plugin 默认产物名 = <plugin-name>-<version>.zip，无法直接通过
@@ -20,6 +20,12 @@ repositories {
 }
 
 val platformVersion: String = providers.gradleProperty("platformVersion").getOrElse("2024.1.7")
+val dshVersion: String = when {
+    project.hasProperty("dshVersion") -> project.property("dshVersion").toString()
+    else -> rootProject.file("scripts/build-dsh.mjs").takeIf { it.isFile }?.readText()?.let { text ->
+        Regex("""opt\('dsh-version',\s*'([^']+)'\)""").find(text)?.groupValues?.get(1)
+    } ?: "0.1.2-rc.1"
+}
 
 val hostOs: String = when {
     System.getProperty("os.name").lowercase().contains("win") -> "win"
@@ -73,6 +79,15 @@ tasks {
         sinceBuild.set("241")
         untilBuild.set("262.*")
         dependsOn("bundleDsh")
+        doLast {
+            val targetDir = destinationDir.get().asFile
+            println("patchPluginXml targetDir: ${targetDir.absolutePath}, dshVersion: $dshVersion")
+            targetDir.walk().filter { it.name == "plugin.xml" }.forEach { file ->
+                val text = file.readText()
+                file.writeText(text.replace("@dshVersion@", dshVersion))
+                println("patched file: ${file.absolutePath}")
+            }
+        }
     }
 
     buildSearchableOptions {
@@ -134,6 +149,11 @@ tasks {
 
     processResources {
         dependsOn("bundleDsh")
+        filesMatching("**/plugin.xml") {
+            filter { line ->
+                line.replace("@dshVersion@", dshVersion)
+            }
+        }
     }
 
     // Make instrumentedJar depend on copying bundle into instrumented classes dir

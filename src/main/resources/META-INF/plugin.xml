@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>cn.jascript.deepseek-harness-idea</id>
-    <name>DeepSeek Harness 0.1.2-rc.1</name>
-    <vendor>DeepSeek</vendor>
+    <name>dsh idea simple</name>
+    <vendor>deepseek harness @dshVersion@</vendor>
 
     <description><![CDATA[
         <h3>English</h3>
