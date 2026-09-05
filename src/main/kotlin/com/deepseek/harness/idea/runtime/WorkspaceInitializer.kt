@@ -12,19 +12,20 @@ import java.util.UUID
  *
  * dsh 的 workspace 是显式注册制：`storages/workspace.json` 没有记录时，UI 显示
  * "选择一个工作区开始"。插件在 dsh 健康检查通过后调用内部 RPC
- * `POST /api/workspace.create`（payload `{path}`）把项目根注册为工作区（幂等：
+ * `POST /api/workspace/create`（payload `{request: {path}}`）把项目根注册为工作区（幂等：
  * 同路径重复调用返回既有实体），使 UI 一打开即默认选中当前项目。
  *
- * **切换项目修复（v0.1.3-dev 实测）**：`workspace.create` 幂等、**不改变**注册表
+ * **切换项目修复（v0.1.3-dev 实测）**：`workspace/create` 幂等、**不改变**注册表
  * 显示顺序（workspace.json `workspaceIds`）；UI 侧边栏/新建会话选择器按该顺序显示，
  * 默认落点 = 列表第一个 workspace。因此切换项目后新项目仍是既有实体时，UI 默认仍
  * 落在旧项目 → 新建会话绑定旧项目工作区。修复：create 成功后调用
- * `POST /api/workspace.insertBefore`（payload `{workspaceId, beforeWorkspaceId}`，
- * dsh 0.1.0-rc.7 已暴露该 RPC）把当前项目挪到列表最前。
+ * `POST /api/workspace/insertBefore`（payload `{request: {workspaceId, beforeWorkspaceId}}`，
+ * 把当前项目挪到列表最前。
  *
  * 实测：
  * - dsh 0.1.0-rc.7 ~ 0.1.1-rc.2：127.0.0.1 loopback 信任围栏放行，无需鉴权头
  * - dsh 0.1.2-rc.1+：BrowserAuth，所有 `api` RPC 也要带 cookie（见 `DshBrowserAuth`）
+ * - RPC gateway 要求 payload 结构为 `{type: "client-request", rpcId, method, payload: {args: {request: {...}}}}`
  */
 object WorkspaceInitializer {
 
@@ -41,14 +42,20 @@ object WorkspaceInitializer {
             val base = webUrl.trimEnd('/')
             val path = projectPath.replace('\\', '/')
             // 1. 注册/复用当前项目 workspace（幂等）
-            val created = rpc(base, "workspace/create", mapOf("path" to path), auth)
+            val created = rpc(base, "workspace/create", mapOf("request" to mapOf("path" to path)), auth)
             if (!created.ok) {
                 LOG.warn("workspace.create failed: ${created.errorText}")
                 return false
             }
             // 2. 挪到最前：UI 默认落点 = 列表第一个 workspace
-            val workspaceId = extractWorkspaceId(created.value)
-            if (workspaceId != null) bringToFront(base, workspaceId, auth)
+            val workspace = created.value["workspace"] as? Map<*, *>
+            val workspaceId = workspace?.get("workspaceId") as? String
+            val workspaceIds = (created.value["workspaceIds"] as? List<*>)
+                ?.mapNotNull { it as? String }
+                .orEmpty()
+            if (workspaceId != null) {
+                bringToFront(base, workspaceId, workspaceIds, auth)
+            }
             LOG.info("workspace.ensureWorkspace ok for $projectPath")
             true
         } catch (e: Exception) {
@@ -68,25 +75,33 @@ object WorkspaceInitializer {
 
     // ---- 内部实现 ----
 
-    /** workspace.create 响应 → workspaceId。 */
-    private fun extractWorkspaceId(value: Map<String, Any?>): String? =
-        (value["workspace"] as? Map<*, *>)?.get("workspaceId") as? String
-
-    /** workspace.list + workspace.insertBefore：把 [workspaceId] 挪到显示顺序最前。 */
-    private fun bringToFront(base: String, workspaceId: String, auth: DshBrowserAuth?) {
-        val list = rpc(base, "workspace/list", emptyMap(), auth)
-        if (!list.ok) {
-            LOG.warn("workspace.list failed: ${list.errorText}")
-            return
+    /** workspace.insertBefore：把 [workspaceId] 挪到显示顺序最前。 */
+    private fun bringToFront(base: String, workspaceId: String, currentOrder: List<String>, auth: DshBrowserAuth?) {
+        val order = if (currentOrder.isNotEmpty()) {
+            currentOrder
+        } else {
+            val list = rpc(base, "workspace/list", emptyMap(), auth)
+            if (list.ok) {
+                (list.value["items"] as? List<*>)
+                    ?.mapNotNull { (it as? Map<*, *>)?.get("workspaceId") as? String }
+                    .orEmpty()
+            } else {
+                emptyList()
+            }
         }
-        val order = (list.value["items"] as? List<*>)
-            ?.mapNotNull { (it as? Map<*, *>)?.get("workspaceId") as? String }
-            .orEmpty()
-        val move = computeBringToFront(order, workspaceId) ?: return // 空列表或已在最前
+        val move = computeBringToFront(order, workspaceId)
+        val targetPayload = if (move != null) {
+            mapOf("workspaceId" to move.first, "beforeWorkspaceId" to move.second)
+        } else if (order.isEmpty()) {
+            // 如果列表为空，直接尝试挪动
+            mapOf("workspaceId" to workspaceId)
+        } else {
+            return // 已在最前
+        }
         val moved = rpc(
             base,
             "workspace/insertBefore",
-            mapOf("workspaceId" to move.first, "beforeWorkspaceId" to move.second),
+            mapOf("request" to targetPayload),
             auth,
         )
         if (moved.ok) {
@@ -133,13 +148,15 @@ object WorkspaceInitializer {
             if (code !in 200..299) return RpcResult(false, errorText = "http $code: ${resp.take(200)}")
             val parsed = runCatching { JsonCodec.decodeObject(resp) }.getOrNull()
                 ?: return RpcResult(false, errorText = "unparseable response: ${resp.take(200)}")
-            // dsh RPC 响应实测结构：{"type":"server-response","rpcId":"...","result":{"ok":...,"value":...|"error":...}}
+            // dsh RPC 响应结构：{"type":"server-response","rpcId":"...","result":{"ok":...,"value":...|"error":...}}
             val result = parsed["result"] as? Map<*, *>
                 ?: return RpcResult(false, errorText = "unexpected response: ${resp.take(200)}")
             return if (result["ok"] == true) {
                 RpcResult(true, (result["value"] as? Map<*, *>)?.let { cast(it) } ?: emptyMap())
             } else {
-                RpcResult(false, errorText = (result["error"] as? String) ?: resp.take(200))
+                val errObj = result["error"]
+                val errMsg = if (errObj is Map<*, *>) errObj["message"] as? String ?: errObj.toString() else errObj as? String ?: resp.take(200)
+                RpcResult(false, errorText = errMsg)
             }
         } finally {
             conn.disconnect()
