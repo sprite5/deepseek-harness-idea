@@ -744,15 +744,15 @@ window.__ModuleLoader__.load({
 .dshMobMenu {
   position: fixed;
   z-index: 60;
-  top: calc(2px + env(safe-area-inset-top, 0px));
-  left: calc(2px + env(safe-area-inset-left, 0px));
-  width: 24px;
-  height: 24px;
+  top: calc(3px + env(safe-area-inset-top, 0px));
+  left: calc(3px + env(safe-area-inset-left, 0px));
+  width: 28px;
+  height: 28px;
   border-radius: 6px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.12));
   background: var(--dsw-alias-button-floating-fill, #fff);
   color: var(--dsw-alias-label-primary, #0f1115);
-  box-shadow: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
   display: none;
   align-items: center;
   justify-content: center;
@@ -763,10 +763,10 @@ window.__ModuleLoader__.load({
   user-select: none;
 }
 .dshMobMenu svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   display: block;
-  opacity: 0.55;
+  opacity: 0.7;
 }
 .dshMobMenu:active {
   background: var(--dsw-alias-button-floating-hover, #f3f4f6);
