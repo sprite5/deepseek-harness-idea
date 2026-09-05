@@ -225,6 +225,20 @@ function stage2NativePrebuilds() {
   if (failed > 0) warn(`${failed} 个 native prebuild 装失败，universal zip 可能缺该平台二进制`);
 }
 
+// ─── HanUI compatibility ────────────────────────────────────────────────
+// DSH 0.1.2 loaders may request dsh-mobile-hanui/index.js explicitly.
+function ensureHanuiCompatibility() {
+  const hanuiDir = path.dirname(hanuiPkg);
+  const srcIndex = path.join(hanuiDir, 'src', 'index.js');
+  const rootIndex = path.join(hanuiDir, 'index.js');
+  if (!fs.existsSync(srcIndex)) throw new Error('缺失: hanui entry (' + srcIndex + ')');
+  fs.writeFileSync(rootIndex, 'export { apply } from \"./src/index.js\"\n');
+  const pkgJson = JSON.parse(fs.readFileSync(hanuiPkg, 'utf8'));
+  pkgJson.exports = { ...(pkgJson.exports || {}), './index.js': './src/index.js' };
+  fs.writeFileSync(hanuiPkg, JSON.stringify(pkgJson, null, 2) + '\n');
+  ok('hanui explicit index.js entry available');
+}
+
 // ─── Stage 3: 验证（仅树检查，不 require native）────────────────────
 function stage3Verify() {
   log('Stage 3: 验证');
@@ -473,6 +487,7 @@ async function main() {
 
   stage1BaseTree();
   stage2NativePrebuilds();
+  ensureHanuiCompatibility();
   stage3Verify();
   stage4Bundle();
 

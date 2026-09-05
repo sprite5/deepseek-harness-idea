@@ -16,6 +16,7 @@ object MobileShellResources {
   "main": "./src/index.js",
   "exports": {
     ".": "./src/index.js",
+    "./index.js": "./src/index.js",
     "./client": "./src/client.js",
     "./package.json": "./package.json"
   },
@@ -42,6 +43,10 @@ object MobileShellResources {
 """
 
     val INDEX_JS = """export function apply() {}
+"""
+
+    /** Compatibility entry for loaders that request dsh-mobile-hanui/index.js directly. */
+    val ROOT_INDEX_JS = """export { apply } from "./src/index.js"
 """
 
     fun clientJs(): String? =

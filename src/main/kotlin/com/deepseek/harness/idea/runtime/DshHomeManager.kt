@@ -284,11 +284,13 @@ class DshHomeManager : Disposable {
             val pkgJson = targetDir.resolve("package.json")
             val patchYml = targetDir.resolve("cordis.patch.yml")
             val indexJs = targetDir.resolve("src/index.js")
+            val rootIndexJs = targetDir.resolve("index.js")
             val clientFile = targetDir.resolve("src/client.js")
 
             writeUtf8IfChanged(pkgJson, MobileShellResources.PACKAGE_JSON)
             writeUtf8IfChanged(patchYml, MobileShellResources.CORDIS_PATCH_YML)
             writeUtf8IfChanged(indexJs, MobileShellResources.INDEX_JS)
+            writeUtf8IfChanged(rootIndexJs, MobileShellResources.ROOT_INDEX_JS)
             writeUtf8IfChanged(clientFile, clientJs)
             LOG.info("deployed dsh-mobile-hanui plugin to $targetDir")
         } catch (e: Exception) {
