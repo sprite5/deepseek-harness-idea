@@ -27,7 +27,7 @@ class DshHomeManager : Disposable {
         private val LOG = Logger.getInstance(DshHomeManager::class.java)
 
         /** 固定 dsh 版本（升级 = 换版本 + 重建运行时，见 DESIGN §3.2） */
-        const val DSH_VERSION = "0.1.1-rc.2"
+        const val DSH_VERSION = "0.1.2-rc.1"
 
         /** 开发态覆盖：DSH_IDEA_RUNTIME=<目录> 直接使用该目录下的 node/ 与 dsh/ */
         const val RUNTIME_OVERRIDE_ENV = "DSH_IDEA_RUNTIME"
@@ -46,7 +46,7 @@ class DshHomeManager : Disposable {
         /**
          * 工具窗窄视口下默认启用移动壳（dsh-mobile-hanui）的 bundle。
          * 作用：内嵌工具窗（JBCEF）宽度往往 ≤1023px，dsh-mobile-hanui 在此视口把
-         * 侧栏/详情面板变成抽屉 + FAB，聊天区占满全宽，从而根除"菜单/侧栏占用编辑空间"。
+         * 侧栏/详情面板变成抽屉（由左缘固定菜单按钮唤出），聊天区占满全宽，从而根除"菜单/侧栏占用编辑空间"。
          * 包由 build-runtime.ps1 一并 npm 安装进运行时 dsh 树（profiles/node_modules junction
          * 可解析）。版本在 scripts/build-runtime.ps1 的 $HanuiVersion 固定。
          */
@@ -108,7 +108,9 @@ class DshHomeManager : Disposable {
             Files.createDirectories(target)
             val tmpZip = target.resolveSibling("dsh-bundle-${System.nanoTime()}.zip")
             stream.use { src -> Files.copy(src, tmpZip, java.nio.file.StandardCopyOption.REPLACE_EXISTING) }
-            unzip(tmpZip, target)
+            // zip 顶层带 dsh/ 前缀（build-dsh.mjs 把 build/dsh/ 内容打包成 dsh/ 根），
+            // 所以解压到 target/dsh/，让解压路径 = target/dsh/node_modules/...
+            unzip(tmpZip, target.resolve("dsh"))
             Files.deleteIfExists(tmpZip)
             Files.isRegularFile(dshBin())
         } catch (e: Exception) {

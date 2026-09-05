@@ -22,7 +22,9 @@ import java.util.UUID
  * `POST /api/workspace.insertBefore`（payload `{workspaceId, beforeWorkspaceId}`，
  * dsh 0.1.0-rc.7 已暴露该 RPC）把当前项目挪到列表最前。
  *
- * 实测（dsh 0.1.0-rc.7）：127.0.0.1 loopback 信任围栏放行，无需鉴权头。
+ * 实测：
+ * - dsh 0.1.0-rc.7 ~ 0.1.1-rc.2：127.0.0.1 loopback 信任围栏放行，无需鉴权头
+ * - dsh 0.1.2-rc.1+：BrowserAuth，所有 `api` RPC 也要带 cookie（见 `DshBrowserAuth`）
  */
 object WorkspaceInitializer {
 
@@ -31,21 +33,22 @@ object WorkspaceInitializer {
     /**
      * 调用 workspace.create + 把当前项目挪到显示顺序最前；成功返回 true。
      * 任一步失败不抛出（日志降级，UI 仍可用；最坏回退到旧行为）。
+     * @param auth dsh 0.1.2+ 的 BrowserAuth 实例（已换到 cookie）；旧版本传 null
      */
-    fun ensureWorkspace(webUrl: String, projectPath: String): Boolean {
+    fun ensureWorkspace(webUrl: String, projectPath: String, auth: DshBrowserAuth? = null): Boolean {
         if (projectPath.isBlank()) return false
         return try {
             val base = webUrl.trimEnd('/')
             val path = projectPath.replace('\\', '/')
             // 1. 注册/复用当前项目 workspace（幂等）
-            val created = rpc(base, "workspace.create", mapOf("path" to path))
+            val created = rpc(base, "workspace.create", mapOf("path" to path), auth)
             if (!created.ok) {
                 LOG.warn("workspace.create failed: ${created.errorText}")
                 return false
             }
             // 2. 挪到最前：UI 默认落点 = 列表第一个 workspace
             val workspaceId = extractWorkspaceId(created.value)
-            if (workspaceId != null) bringToFront(base, workspaceId)
+            if (workspaceId != null) bringToFront(base, workspaceId, auth)
             LOG.info("workspace.ensureWorkspace ok for $projectPath")
             true
         } catch (e: Exception) {
@@ -70,8 +73,8 @@ object WorkspaceInitializer {
         (value["workspace"] as? Map<*, *>)?.get("workspaceId") as? String
 
     /** workspace.list + workspace.insertBefore：把 [workspaceId] 挪到显示顺序最前。 */
-    private fun bringToFront(base: String, workspaceId: String) {
-        val list = rpc(base, "workspace.list", emptyMap())
+    private fun bringToFront(base: String, workspaceId: String, auth: DshBrowserAuth?) {
+        val list = rpc(base, "workspace.list", emptyMap(), auth)
         if (!list.ok) {
             LOG.warn("workspace.list failed: ${list.errorText}")
             return
@@ -84,6 +87,7 @@ object WorkspaceInitializer {
             base,
             "workspace.insertBefore",
             mapOf("workspaceId" to move.first, "beforeWorkspaceId" to move.second),
+            auth,
         )
         if (moved.ok) {
             LOG.info("workspace $workspaceId moved to front (order=${moved.value["workspaceIds"]})")
@@ -99,7 +103,7 @@ object WorkspaceInitializer {
     )
 
     /** 调用 dsh 内部 RPC（client-request 封装）；解析 `{ok, value?, error?}`。 */
-    private fun rpc(base: String, method: String, payload: Map<String, Any?>): RpcResult {
+    private fun rpc(base: String, method: String, payload: Map<String, Any?>, auth: DshBrowserAuth?): RpcResult {
         val rpcId = "dsh-idea-" + UUID.randomUUID().toString()
         val body = gson(
             mapOf(
@@ -109,14 +113,17 @@ object WorkspaceInitializer {
                 "payload" to payload,
             )
         )
-        val conn = URL("$base/api/$method").openConnection() as HttpURLConnection
+        val conn = if (auth != null) auth.open("/api/$method", "POST", body)
+        else URL("$base/api/$method").openConnection() as HttpURLConnection
         try {
-            conn.requestMethod = "POST"
-            conn.connectTimeout = 5000
-            conn.readTimeout = 8000
-            conn.doOutput = true
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
+            if (auth == null) {
+                conn.requestMethod = "POST"
+                conn.connectTimeout = 5000
+                conn.readTimeout = 8000
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.outputStream.use { it.write(body.toByteArray(StandardCharsets.UTF_8)) }
+            }
             val code = conn.responseCode
             val resp = if (code in 200..299) {
                 conn.inputStream.bufferedReader().readText()

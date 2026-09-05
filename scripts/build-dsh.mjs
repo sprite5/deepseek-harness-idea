@@ -43,7 +43,7 @@ function opt(name, def) {
 }
 function flag(name) { return args.includes('--' + name); }
 
-const dshVersion = opt('dsh-version', '0.1.1-rc.2');
+const dshVersion = opt('dsh-version', '0.1.2-rc.1');
 const hanuiVersion = opt('hanui-version', '0.2.5');
 const output = opt('output', path.join(root, 'build', 'dsh'));
 const registry = opt('registry', process.env.npm_config_registry || 'https://registry.npmmirror.com/');
@@ -118,7 +118,7 @@ function stage1BaseTree() {
     rm(dshDir);
     fs.mkdirSync(dshDir, { recursive: true });
     // node_modules 内容 → dshDir/node_modules/
-    copyTree(srcTree, path.join(dshDir, 'node_modules'));
+    copyTree(srcTree, path.join(dshDir, 'node_modules'), ['@anthropic-ai']);
     // 顶层 package.json 也拷过来（stage 1 verify 不严格需要，但保持完整性）
     const srcPkg = path.join(path.dirname(srcTree), 'package.json');
     if (fs.existsSync(srcPkg)) fs.copyFileSync(srcPkg, path.join(dshDir, 'package.json'));
@@ -290,8 +290,10 @@ function stage4Bundle() {
   fs.rmSync(bundleZip, { force: true });
 
   // 把 dshDir 的内容打包为 dsh/ 根（不是 dshDir 本身），与 DshHomeManager 解压逻辑一致
-  const dshContentDir = path.join(output, 'dsh');
-  createZip(dshContentDir, bundleZip, { exclude: (name) => name.includes('.npm-cache') });
+  // dshDir = build/dsh/dsh/；用其父目录 build/dsh/ 让产物带 dsh/ 前缀
+  // 注意：dshBin() 期望文件在 runtimeRoot/dsh/node_modules/ 下，所以 zip 必须带 dsh/ 前缀
+  const dshContentDir = output;
+  createZip(dshContentDir, bundleZip, { exclude: (name) => name.includes('.npm-cache') || name.includes('@anthropic-ai') });
 
   const sizeMb = Math.round(fs.statSync(bundleZip).size / 1048576 * 10) / 10;
   ok(`${path.basename(bundleZip)} (${sizeMb} MB, ${zipStats.files} files, ${zipStats.deflated} deflate + ${zipStats.stored} store)`);
@@ -447,13 +449,14 @@ function rm(p) {
 }
 
 // 递归复制 src → dst，保留目录结构
-function copyTree(src, dst) {
+function copyTree(src, dst, skipDirs = []) {
   if (!fs.existsSync(src)) return;
   fs.mkdirSync(dst, { recursive: true });
   for (const e of fs.readdirSync(src, { withFileTypes: true })) {
+    if (skipDirs.includes(e.name)) continue;
     const s = path.join(src, e.name);
     const d = path.join(dst, e.name);
-    if (e.isDirectory()) copyTree(s, d);
+    if (e.isDirectory()) copyTree(s, d, skipDirs);
     else {
       // 用 copyFileSync 而不是 read+write，处理权限保留
       fs.copyFileSync(s, d);

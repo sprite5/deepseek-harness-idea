@@ -730,7 +730,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
     }
 
     /** 注册 CEF load handler：主 frame 加载完成后注入前端辅助脚本（内测声明点掉 + API Key 捕获
-     *  + CodeBuddy 高密度紧凑工作区样式）。dsh-mobile-hanui 在窄视口负责侧栏→抽屉 + FAB 的改造，
+     *  + CodeBuddy 高密度紧凑工作区样式）。dsh-mobile-hanui 在窄视口负责侧栏→抽屉 + 左缘菜单按钮的改造，
      *  这里负责聊天/代码块/文件胶囊的紧凑化（独立注入，不依赖 dsh 加载任何 client plugin）。
      *
      *  注入策略：onLoadEnd 触发时执行一次；onLoadEnd 不触发 / 失败不影响其他注入，
@@ -808,7 +808,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
      *   4) 消息正文与列表 (markdown_*) — 标题/段落/列表间距整体收紧
      *   5) 代码块顶部工具条 (Copy 按钮 / 语言标识) — 字号缩小
      *
-     * 不影响 dsh-mobile-hanui 的抽屉/FAB 行为；范围限定在工作区与消息流内的"信息密度"问题。
+     * 不影响 dsh-mobile-hanui 的抽屉/菜单按钮行为；范围限定在工作区与消息流内的"信息密度"问题。
      */
     private fun buildCompactWorkspaceScript(): String {
         val css = COMPACT_WORKSPACE_CSS

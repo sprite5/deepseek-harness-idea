@@ -58,11 +58,20 @@ class DshProcessManager(
     @Volatile private var process: Process? = null
     @Volatile private var currentState: State = State.STOPPED
     @Volatile private var webPort: Int? = null
+    /** dsh 0.1.2+ 启动时携带 ?token= 的完整 URL；浏览器加载与健康检查都要用它 */
+    @Volatile private var webUrl: String? = null
+    /** dsh 0.1.2+ BrowserAuth：换到的 cookie，给 workspace 初始化器等 RPC 调用复用 */
+    @Volatile private var browserAuth: DshBrowserAuth? = null
+    /** 从 URL 里 抽出来的 launchToken（不直接存 URL，避免泄漏给非必要调用方） */
+    @Volatile private var launchToken: String? = null
     private var restartAttempts = 0
 
     fun currentState(): State = currentState
     fun webPort(): Int? = webPort
-    fun webUrl(): String? = webPort()?.let { "http://127.0.0.1:$it" }
+    fun webUrl(): String? = webUrl ?: webPort()?.let { "http://127.0.0.1:$it" }
+
+    /** 已认证的 dsh BrowserAuth 实例；null = 未就绪 / 旧版本无 auth */
+    fun browserAuth(): DshBrowserAuth? = browserAuth
 
     fun addListener(listener: Listener) {
         listeners.add(listener)
@@ -126,6 +135,9 @@ class DshProcessManager(
         }
         process = p
         webPort = null
+        webUrl = null
+        browserAuth = null
+        launchToken = null
         LOG.info("dsh process started pid=${p.pid()} cwd=${workDir.absolutePath} home=$homeDir")
         readAsync(p.inputStream)
         p.onExit().whenComplete { _, err -> onProcessExit(p, err) }
@@ -142,34 +154,64 @@ class DshProcessManager(
                         LOG.debug("[dsh] $line")
                     }
                     listeners.forEach { it.onLogLine(line) }
-                    PortParser.parsePort(line)?.let { port -> onPortFound(port) }
+                    // 先尝试解析完整 URL（含 ?token=），仅回退到纯端口
+                    val fullUrl = PortParser.parseUrl(line)
+                    val port = PortParser.parsePort(line)
+                    if (fullUrl != null || port != null) onUrlFound(port, fullUrl)
                 }
             }
         }
     }
 
-    private fun onPortFound(port: Int) {
+    private fun onUrlFound(port: Int?, fullUrl: String?) {
         if (webPort != null || stopRequested.get()) return
-        webPort = port
-        executor.execute { waitHealthy(port) }
+        val p = port ?: return
+        webPort = p
+        // 完整 URL 优先（含 dsh 0.1.2+ 的启动 token）；缺失时降级到无 token URL
+        val resolvedUrl = fullUrl ?: "http://127.0.0.1:$p/"
+        webUrl = resolvedUrl
+        // 抽 token（dsh 0.1.2+ 才有），并实例化 BrowserAuth
+        val token = extractToken(resolvedUrl)
+        launchToken = token
+        browserAuth = if (token != null) DshBrowserAuth("http://127.0.0.1:$p") else null
+        executor.execute { waitHealthy(p) }
+    }
+
+    /** 提取 URL 中的 ?token= 值；返回 null 表示旧版本（无 token） */
+    private fun extractToken(url: String): String? {
+        val q = url.substringAfter('?', missingDelimiterValue = "")
+        if (q.isEmpty()) return null
+        return q.split('&').mapNotNull { pair ->
+            val parts = pair.split('=', limit = 2)
+            if (parts.size == 2 && parts[0] == "token") parts[1] else null
+        }.firstOrNull()
     }
 
     private fun waitHealthy(port: Int) {
-        val url = "http://127.0.0.1:$port/"
+        val auth = browserAuth
+        val token = launchToken
+        // dsh 0.1.2+：先换 cookie，再用 cookie 做健康检查
+        if (auth != null && token != null && !auth.isReady) {
+            if (!auth.authenticate(token)) {
+                LOG.warn("dsh BrowserAuth failed; retrying...")
+                try { Thread.sleep(HEALTH_INTERVAL_MS) } catch (_: InterruptedException) { return }
+                // 不 return — 下次循环再试
+            }
+        }
         repeat(HEALTH_MAX_TRIES) {
             if (stopRequested.get()) return
-            if (isHealthy(url)) {
+            if (isHealthy()) {
                 synchronized(this) {
                     restartScheduled.set(false)
                     restartAttempts = 0
                     setState(State.RUNNING)
                 }
-                val webUrl = "http://127.0.0.1:$port"
-                LOG.info("dsh web ready: $webUrl")
-                listeners.forEach { it.onUrlReady(webUrl) }
+                val readyUrl = webUrl ?: "http://127.0.0.1:$port/"
+                LOG.info("dsh web ready: $readyUrl")
+                listeners.forEach { it.onUrlReady(readyUrl) }
                 // FR-04.2：把项目根注册为默认工作区（幂等；失败仅降级，不阻塞 UI）
                 if (projectPath.isNotBlank()) {
-                    WorkspaceInitializer.ensureWorkspace(webUrl, projectPath)
+                    WorkspaceInitializer.ensureWorkspace(readyUrl, projectPath, browserAuth)
                 }
                 return
             }
@@ -182,8 +224,16 @@ class DshProcessManager(
         }
     }
 
-    private fun isHealthy(url: String): Boolean = try {
-        val conn = URL(url).openConnection() as HttpURLConnection
+    private fun isHealthy(): Boolean = try {
+        val auth = browserAuth
+        val conn = if (auth != null && auth.isReady) {
+            // dsh 0.1.2+：带 cookie 健康检查（GET / 期望 303 redirect-loopback 或 200）
+            auth.open("/")
+        } else {
+            // 旧版本或 token 尚未换到：直接 GET /
+            val url = webUrl?.removeSuffix("/") ?: webPort()?.let { "http://127.0.0.1:$it" } ?: return false
+            URL(url).openConnection() as HttpURLConnection
+        }
         conn.connectTimeout = 2000
         conn.readTimeout = 2000
         conn.requestMethod = "GET"

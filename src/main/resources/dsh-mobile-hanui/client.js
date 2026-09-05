@@ -1,17 +1,21 @@
 /**
- * Mobile shell v17 — compact session header + smaller FishLogo FAB.
+ * Mobile shell v18 — fixed left-edge menu button + DSH drawer icon.
  *
  * Root cause of “only menu visible” (v11): `grid-template-columns: 0 1fr 0` +
  * `position:fixed` on sidebar/details removes them from grid flow → center
  * auto-places into track 1 (width 0). Fix: `grid-column: 2` on centerCol.
  *
- * v16 rules:
+ * v18 changes:
+ * - Menu button (.dshMobMenu) pinned to the LEFT edge (CSS fixed left:8px);
+ *   no longer draggable — pure tap-to-open, icon swapped from the FishLogo
+ *   to the DSH sidebar/drawer glyph (16x16, same as dsh chrome).
+ *
+ * Retained rules:
  * - Pin .centerCol to grid-column:2 / grid-row:1 under mobile shell
  * - Never transform the center column; never lock html/body/#root height
- * - Drawer from the LEFT; open via FAB click/tap (no swipe-open)
+ * - Drawer from the LEFT; open via menu button click/tap (no swipe-open)
  * - Close: backdrop tap + swipe-left on backdrop; no X button
  * - Main grid stays 0 1fr 0 so local page does not move/squeeze
- * - FAB: touch-action none + capture on pointerdown; open on pointerup if not drag
  * - Header: AgentPreset「模式」beside 轨迹 tabs (title row free)
  * - Session tap auto-close: YDXeBa_sessionRow / searchResultRow (+ 140/280ms)
  * - Plugin only (dsh.client)
@@ -30,10 +34,6 @@ window.__ModuleLoader__.load({
     const STYLE_ID = 'dsh-mobile-hanui-css-v1'
     const HTML_CLASS = 'dsh-mobile-shell'
     const ATTR_DETAILS = 'data-dsh-mobile-details-open'
-    const FAB_POS_KEY = 'dsh-mobile-fab-pos-v2'
-    const DRAG_THRESHOLD = 8
-    const FAB_SIZE = 36
-    const FAB_MARGIN = 8
     // Swipe-close only (backdrop); axis-lock aborts vertical pans
     const SWIPE_AXIS_LOCK = 12
     const SWIPE_DX_MIN = 48
@@ -744,31 +744,32 @@ window.__ModuleLoader__.load({
 .dshMobMenu {
   position: fixed;
   z-index: 60;
-  top: calc(8px + env(safe-area-inset-top, 0px));
-  left: calc(50% - 18px);
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  top: calc(2px + env(safe-area-inset-top, 0px));
+  left: calc(2px + env(safe-area-inset-left, 0px));
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
   border: 1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.12));
   background: var(--dsw-alias-button-floating-fill, #fff);
   color: var(--dsw-alias-label-primary, #0f1115);
-  box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  box-shadow: none;
   display: none;
   align-items: center;
   justify-content: center;
   padding: 0;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  touch-action: none;
+  touch-action: manipulation;
   user-select: none;
+}
+.dshMobMenu svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+  opacity: 0.55;
 }
 .dshMobMenu:active {
   background: var(--dsw-alias-button-floating-hover, #f3f4f6);
-}
-.dshMobMenu svg {
-  width: 18px;
-  height: auto;
-  display: block;
 }
 .dshMobMenu[data-flash="true"] {
   border-color: var(--dsw-alias-label-primary, #0f1115);
@@ -846,48 +847,6 @@ window.__ModuleLoader__.load({
       return proxy?.__raw ?? proxy
     }
 
-    function defaultFabPos() {
-      const vw = typeof window !== 'undefined' ? window.innerWidth : 375
-      const centerX = Math.round((vw - FAB_SIZE) / 2)
-      return { left: centerX, top: 8 }
-    }
-
-    function clampFabPos(left, top) {
-      const vw = typeof window !== 'undefined' ? window.innerWidth : 375
-      const vh = typeof window !== 'undefined' ? window.innerHeight : 667
-      const maxX = Math.max(FAB_MARGIN, vw - FAB_SIZE - FAB_MARGIN)
-      const maxY = Math.max(FAB_MARGIN, vh - FAB_SIZE - FAB_MARGIN)
-      return {
-        left: Math.min(maxX, Math.max(FAB_MARGIN, left)),
-        top: Math.min(maxY, Math.max(FAB_MARGIN, top)),
-      }
-    }
-
-    function readFabPos() {
-      try {
-        const raw = localStorage.getItem(FAB_POS_KEY)
-        if (!raw) return null
-        const parsed = JSON.parse(raw)
-        if (
-          typeof parsed?.left !== 'number' ||
-          typeof parsed?.top !== 'number' ||
-          !Number.isFinite(parsed.left) ||
-          !Number.isFinite(parsed.top)
-        ) {
-          return null
-        }
-        return clampFabPos(parsed.left, parsed.top)
-      } catch (_) {
-        return null
-      }
-    }
-
-    function writeFabPos(pos) {
-      try {
-        localStorage.setItem(FAB_POS_KEY, JSON.stringify(pos))
-      } catch (_) {}
-    }
-
     function useMobile() {
       const [mobile, setMobile] = React.useState(
         () => typeof window !== 'undefined' && window.matchMedia(MOBILE_MQ).matches && !shellDisabled(),
@@ -906,20 +865,22 @@ window.__ModuleLoader__.load({
       return mobile
     }
 
-    // Exact DSH FishLogo path (from @deepseek-ai/dsh-client-ui-primitives) — inline only
-    const FISH_LOGO_PATH =
-      'M22.9168 1.43018C22.6713 1.31018 22.5658 1.53918 22.4223 1.65519C22.3733 1.69269 22.3318 1.74169 22.2903 1.78669C21.9317 2.1697 21.5127 2.42121 20.9657 2.39121C20.1657 2.34621 19.4827 2.59771 18.8787 3.20973C18.7502 2.45521 18.3236 2.0047 17.6746 1.71569C17.3351 1.56568 16.9916 1.41518 16.7536 1.08867C16.5876 0.856163 16.5421 0.597155 16.4591 0.341647C16.4061 0.187643 16.3536 0.0301382 16.1761 0.00363739C15.9836 -0.0263635 15.9081 0.135141 15.8326 0.270145C15.5306 0.822162 15.4136 1.43018 15.4251 2.0462C15.4516 3.43174 16.0366 4.53527 17.1991 5.3203C17.3311 5.4103 17.3651 5.5003 17.3236 5.63181C17.2441 5.90231 17.1501 6.16482 17.0671 6.43533C17.0141 6.60784 16.9351 6.64584 16.7501 6.57033C16.1121 6.30383 15.5611 5.90931 15.074 5.4328C14.2475 4.63328 13.5 3.75075 12.568 3.05973C12.349 2.89822 12.13 2.74822 11.9034 2.60522C10.9524 1.68169 12.028 0.923165 12.277 0.833162C12.5375 0.739159 12.3675 0.41615 11.5259 0.42015C10.6844 0.42365 9.91439 0.705658 8.93286 1.08117C8.78935 1.13767 8.63835 1.17867 8.48384 1.21267C7.59332 1.04367 6.66829 1.00617 5.70226 1.11517C3.88321 1.31768 2.43016 2.1777 1.36213 3.64575C0.0790928 5.4103 -0.222916 7.41536 0.146595 9.50642C0.535106 11.7105 1.66014 13.535 3.38869 14.9616C5.18125 16.4406 7.24581 17.1657 9.60138 17.0266C11.0319 16.9441 12.6245 16.7526 14.421 15.2321C14.874 15.4576 15.3496 15.5476 16.1381 15.6151C16.7456 15.6716 17.3306 15.5851 17.7836 15.4911C18.4931 15.3411 18.4441 14.6841 18.1876 14.5636C16.1081 13.595 16.5646 13.9891 16.1496 13.67C17.2061 12.42 18.8202 10.1979 19.3182 7.17235C19.3672 6.83834 19.4297 6.36783 19.4222 6.09732C19.4182 5.93231 19.4562 5.86831 19.6447 5.84931C20.1657 5.78931 20.6712 5.64681 21.1357 5.3913C22.4833 4.65528 23.0268 3.44624 23.1548 1.9972C23.1738 1.77569 23.1508 1.54668 22.9168 1.43018ZM11.1749 14.4736C9.15936 12.889 8.18184 12.3675 7.77832 12.39C7.40081 12.4125 7.46881 12.8445 7.55182 13.126C7.63882 13.404 7.75182 13.5955 7.91033 13.8396C8.01983 14.0011 8.09533 14.2411 7.80083 14.4216C7.15181 14.8231 6.02327 14.2866 5.97027 14.2601C4.65673 13.4865 3.5587 12.4655 2.78467 11.069C2.03715 9.72493 1.60314 8.28289 1.53164 6.74384C1.51264 6.37233 1.62214 6.24082 1.99215 6.17332C2.47916 6.08332 2.98118 6.06432 3.46769 6.13582C5.52476 6.43633 7.27581 7.35586 8.74385 8.8129C9.58188 9.64243 10.2159 10.634 10.8689 11.6025C11.5634 12.631 12.3105 13.611 13.262 14.4146C13.598 14.6961 13.866 14.9101 14.1225 15.0681C13.349 15.1546 12.058 15.1731 11.1749 14.4746L11.1749 14.4736ZM12.141 8.25988C12.141 8.09488 12.273 7.96338 12.439 7.96338C12.4765 7.96338 12.5105 7.97088 12.541 7.98188C12.5825 7.99688 12.6205 8.01938 12.6505 8.05338C12.7035 8.10588 12.7335 8.18088 12.7335 8.25988C12.7335 8.42489 12.6015 8.55639 12.4355 8.55639C12.2695 8.55639 12.141 8.42489 12.141 8.25988ZM15.1415 9.79893C14.949 9.87793 14.7565 9.94544 14.5715 9.95294C14.2845 9.96794 13.9715 9.85143 13.8015 9.70893C13.5375 9.48742 13.3485 9.36342 13.2695 8.97691C13.2355 8.8119 13.2545 8.55639 13.2845 8.40989C13.3525 8.09438 13.277 7.89187 13.0545 7.70787C12.8735 7.55786 12.643 7.51636 12.39 7.51636C12.2955 7.51636 12.209 7.47486 12.1445 7.44136C12.039 7.38886 11.9519 7.25735 12.035 7.09585C12.0615 7.04335 12.19 6.91584 12.22 6.89334C12.5635 6.69784 12.9595 6.76184 13.326 6.90834C13.6655 7.04735 13.9225 7.30236 14.292 7.66287C14.6695 8.09838 14.7375 8.21838 14.9525 8.54539C15.1225 8.8009 15.277 9.06341 15.3831 9.36392C15.4471 9.55142 15.3641 9.70493 15.1415 9.79893Z'
+    // DSH 抽屉 / 侧栏菜单 icon (16x16 viewBox) — 与 dsh 原生 chrome 一致
+    const DRAWER_ICON_PATH =
+      'M9.67272 0.522841C10.8339 0.522841 11.76 0.522714 12.4963 0.602493C13.2453 0.683657 13.8789 0.854248 14.4264 1.25197C14.7504 1.48739 15.0355 1.77247 15.2709 2.0965C15.6686 2.64394 15.8392 3.27758 15.9204 4.02655C16.0002 4.7629 16 5.68895 16 6.85014V9.14986C16 10.3111 16.0002 11.2371 15.9204 11.9735C15.8392 12.7224 15.6686 13.3561 15.2709 13.9035C15.0355 14.2275 14.7504 14.5126 14.4264 14.748C13.8789 15.1458 13.2453 15.3163 12.4963 15.3975C11.76 15.4773 10.8339 15.4772 9.67272 15.4772H6.3273C5.16611 15.4772 4.24006 15.4773 3.50371 15.3975C2.75474 15.3163 2.1211 15.1458 1.57366 14.748C1.24963 14.5126 0.964549 14.2275 0.729131 13.9035C0.331407 13.3561 0.160817 12.7224 0.0796529 11.9735C-0.000126137 11.2371 1.25338e-09 10.3111 1.25338e-09 9.14986V6.85014C1.25329e-09 5.68895 -0.000126137 4.7629 0.0796529 4.02655C0.160817 3.27758 0.331407 2.64394 0.729131 2.0965C0.964549 1.77247 1.24963 1.48739 1.57366 1.25197C2.1211 0.854248 2.75474 0.683657 3.50371 0.602493C4.24006 0.522714 5.16611 0.522841 6.3273 0.522841H9.67272ZM5.54303 1.88715V14.1118C5.78636 14.1128 6.04709 14.1169 6.3273 14.1169H9.67272C10.8639 14.1169 11.7032 14.1164 12.3493 14.0465C12.9824 13.9779 13.3497 13.8494 13.6268 13.6482C13.8354 13.4966 14.0195 13.3125 14.1711 13.1039C14.3723 12.8268 14.5007 12.4595 14.5693 11.8264C14.6393 11.1803 14.6398 10.341 14.6398 9.14986V6.85014C14.6398 5.65896 14.6393 4.81967 14.5693 4.1736C14.5007 3.54048 14.3723 3.17318 14.1711 2.89609C14.0195 2.68747 13.8354 2.50337 13.6268 2.35179C13.3497 2.1506 12.9824 2.02212 12.3493 1.95353C11.7032 1.88358 10.8639 1.88307 9.67272 1.88307H6.3273C6.04709 1.88307 5.78636 1.8862 5.54303 1.88715ZM4.1828 1.91166C3.99125 1.9216 3.8148 1.93577 3.65076 1.95353C3.01764 2.02212 2.65034 2.1506 2.37325 2.35179C2.16463 2.50337 1.98052 2.68747 1.82895 2.89609C1.62776 3.17318 1.49928 3.54048 1.43069 4.1736C1.36074 4.81967 1.36023 5.65896 1.36023 6.85014V9.14986C1.36023 10.341 1.36074 11.1803 1.43069 11.8264C1.49928 12.4595 1.62776 12.8268 1.82895 13.1039C1.98052 13.3125 2.16463 13.4966 2.37325 13.6482C2.65034 13.8494 3.01764 13.9779 3.65076 14.0465C3.81478 14.0642 3.99127 14.0774 4.1828 14.0873V1.91166Z'
 
-    function IconFishLogo() {
+    function IconDrawer() {
       return jsx('svg', {
-        viewBox: '0 0 23.16 17.04',
-        width: 22,
-        height: (22 * 17.04) / 23.16,
+        viewBox: '0 0 16 16',
+        width: 16,
+        height: 16,
         fill: 'none',
         'aria-hidden': true,
         children: jsx('path', {
-          d: FISH_LOGO_PATH,
+          d: DRAWER_ICON_PATH,
           fill: 'currentColor',
+          'fill-rule': 'evenodd',
+          'clip-rule': 'evenodd',
         }),
       })
     }
@@ -998,31 +959,9 @@ window.__ModuleLoader__.load({
       const [sidebarEl, setSidebarEl] = React.useState(null)
       const [collapsed, setCollapsed] = React.useState(true)
       const [detailsOpen, setDetailsOpen] = React.useState(false)
-      const [fabPos, setFabPos] = React.useState(() => readFabPos())
       const getLayoutRef = React.useRef(getLayoutFn)
       getLayoutRef.current = getLayoutFn
       const ignoreBackdropClickUntil = React.useRef(0)
-      const fabBtnRef = React.useRef(null)
-      const fabDragRef = React.useRef({
-        active: false,
-        dragging: false,
-        draggedThisGesture: false,
-        pointerId: null,
-        startX: 0,
-        startY: 0,
-        originLeft: 0,
-        originTop: 0,
-        offsetX: 0,
-        offsetY: 0,
-        lastLeft: 0,
-        lastTop: 0,
-      })
-
-      // The button's idle position is owned by React's `style` prop (fabStyle),
-      // and imperative left/top writes happen only during an active drag for
-      // smooth finger-follow. After commit, React re-renders `style={{left,top}}`
-      // from fabPos, so there is nothing to clear — clearing here would wipe the
-      // committed position and make the FAB snap back to its CSS default.
 
       const withLayout = React.useCallback((fn) => {
         try {
@@ -1038,11 +977,6 @@ window.__ModuleLoader__.load({
         const layout = getLayout(getLayoutRef.current?.())
         if (!layout?.toggleSidebar) {
           console.warn('[dsh-mobile-hanui] toggleSidebar unavailable')
-          const btn = fabBtnRef.current
-          if (btn) {
-            btn.setAttribute('data-flash', 'true')
-            window.setTimeout(() => btn.removeAttribute('data-flash'), 200)
-          }
           return
         }
         // The FAB is only rendered while collapsed, so a straight toggle here
@@ -1374,31 +1308,6 @@ window.__ModuleLoader__.load({
         }
       }, [mobile, onClose])
 
-      // Re-clamp FAB on viewport changes
-      React.useEffect(() => {
-        if (!mobile) return
-        const reclamp = () => {
-          setFabPos((prev) => {
-            if (!prev) return prev
-            const next = clampFabPos(prev.left, prev.top)
-            if (next.left !== prev.left || next.top !== prev.top) {
-              writeFabPos(next)
-              return next
-            }
-            return prev
-          })
-        }
-        window.addEventListener('resize', reclamp)
-        window.addEventListener('orientationchange', reclamp)
-        const vv = window.visualViewport
-        vv?.addEventListener?.('resize', reclamp)
-        return () => {
-          window.removeEventListener('resize', reclamp)
-          window.removeEventListener('orientationchange', reclamp)
-          vv?.removeEventListener?.('resize', reclamp)
-        }
-      }, [mobile])
-
       React.useEffect(() => {
         if (!mobile || !sidebarEl || !frame) return
         const onClick = (e) => {
@@ -1458,99 +1367,11 @@ window.__ModuleLoader__.load({
         return () => window.removeEventListener('keydown', onKey)
       }, [mobile, frame, toggleSidebar, closeDetails])
 
-      const onFabPointerDown = (e) => {
-        if (e.button != null && e.button !== 0) return
-        const el = e.currentTarget
-        const rect = el.getBoundingClientRect()
-        const left = fabPos?.left ?? rect.left
-        const top = fabPos?.top ?? rect.top
-        fabDragRef.current = {
-          active: true,
-          dragging: false,
-          draggedThisGesture: false,
-          pointerId: e.pointerId,
-          startX: e.clientX,
-          startY: e.clientY,
-          originLeft: left,
-          originTop: top,
-          offsetX: e.clientX - rect.left,
-          offsetY: e.clientY - rect.top,
-          lastLeft: left,
-          lastTop: top,
-        }
-        el.setAttribute('data-dragging', 'true')
-        // NOTE: do NOT setPointerCapture here — capture disrupts the native
-        // click on mobile (iOS Safari / Android Chrome), so a clean tap would
-        // never fire onClick (the sole open path). `touch-action: none` already
-        // keeps the pointer tracked on the button during a drag without capture.
-      }
-
-      const onFabPointerMove = (e) => {
-        const st = fabDragRef.current
-        if (!st.active || st.pointerId !== e.pointerId) return
-        const dx = e.clientX - st.startX
-        const dy = e.clientY - st.startY
-        if (!st.dragging && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
-        if (!st.dragging) {
-          st.dragging = true
-          st.draggedThisGesture = true
-        }
-        const next = clampFabPos(e.clientX - st.offsetX, e.clientY - st.offsetY)
-        st.lastLeft = next.left
-        st.lastTop = next.top
-        const el = fabBtnRef.current || e.currentTarget
-        if (el) {
-          el.style.left = `${next.left}px`
-          el.style.top = `${next.top}px`
-          el.style.right = 'auto'
-          el.style.bottom = 'auto'
-        }
-        // DO NOT call setFabPos here — React commit only on pointerup
-      }
-
-      const endFabPointer = (e) => {
-        const st = fabDragRef.current
-        if (!st.active || (e.pointerId != null && st.pointerId !== e.pointerId)) return
-        const wasDragging = st.dragging
-        st.active = false
-        st.dragging = false
-        st.pointerId = null
-        const el = e.currentTarget
-        el?.removeAttribute?.('data-dragging')
-        if (wasDragging) {
-          // Only a real drag must block the trailing click (done via
-          // draggedThisGesture in onClick); commit the dragged position.
-          const pos = clampFabPos(st.lastLeft, st.lastTop)
-          writeFabPos(pos)
-          setFabPos(pos) // React re-renders style={{left,top}}; no imperative clear
-          return
-        }
-        // Clean tap: do NOT open here and do NOT suppress the click — the
-        // button's onClick is the sole open path (avoids the pointerup/click
-        // double-fire that hides the FAB mid-sequence and drops the open).
-      }
-
-      const onFabClick = (e) => {
-        const st = fabDragRef.current
-        if (st.draggedThisGesture) {
-          // Just completed a drag in a prior gesture — swallow this click.
-          e.preventDefault()
-          e.stopPropagation()
-          st.draggedThisGesture = false
-          return
-        }
-        openSidebar()
-      }
-
       if (!mobile) return null
 
       const sidebarOpen = !!frame && !collapsed
       const showMenu = !!frame && collapsed && !detailsOpen
       const showBackdrop = sidebarOpen || detailsOpen
-
-      const fabStyle = fabPos
-        ? { left: `${fabPos.left}px`, top: `${fabPos.top}px` }
-        : undefined
 
       const onBackdropClick = () => {
         if (Date.now() < ignoreBackdropClickUntil.current) return
@@ -1561,17 +1382,11 @@ window.__ModuleLoader__.load({
         children: [
           jsx('button', {
             type: 'button',
-            ref: fabBtnRef,
             className: 'dshMobMenu',
             'data-visible': showMenu ? 'true' : 'false',
             'aria-label': '打开菜单',
-            style: fabStyle,
-            onPointerDown: onFabPointerDown,
-            onPointerMove: onFabPointerMove,
-            onPointerUp: endFabPointer,
-            onPointerCancel: endFabPointer,
-            onClick: onFabClick,
-            children: jsx(IconFishLogo, {}),
+            onClick: openSidebar,
+            children: jsx(IconDrawer, {}),
           }),
           jsx('button', {
             type: 'button',
@@ -1613,3 +1428,4 @@ window.__ModuleLoader__.load({
     return module.exports
   },
 })
+

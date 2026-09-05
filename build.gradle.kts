@@ -72,6 +72,7 @@ tasks {
     patchPluginXml {
         sinceBuild.set("241")
         untilBuild.set("262.*")
+        dependsOn("bundleDsh")
     }
 
     buildSearchableOptions {
@@ -103,21 +104,40 @@ tasks {
     }
 
     register("bundleDsh", Copy::class) {
-        description = "Package the universal dsh tree as dsh-bundle.zip into plugin resources (any host: win/macos/linux)"
+        description = "Package the universal dsh tree as dsh-bundle.zip into plugin resources"
         group = "build"
+        dependsOn("buildDsh")
         val bundle = rootProject.file("build/dsh-universal.zip")
-        if (!bundle.exists()) {
-            dependsOn("buildDsh")
-        }
-        val dest = rootProject.layout.buildDirectory.dir("plugin-runtime")
+        val runtimeDest = rootProject.layout.buildDirectory.dir("plugin-runtime")
+        inputs.file(bundle)
+        outputs.dir(runtimeDest)
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        doFirst { runtimeDest.get().asFile.deleteRecursively() }
+        from(bundle) { rename { "dsh-bundle.zip" } }
+        into(runtimeDest)
+        from(bundle) { rename { "dsh-bundle.zip" } }
+        into(rootProject.file("src/main/resources"))
+    }
+
+    // Copy bundle into instrumented classes dir so instrumentedJar includes it
+    register("copyBundleToInstrumented", Copy::class) {
+        description = "Copy dsh-bundle.zip into instrumented classes dir"
+        group = "build"
+        dependsOn("bundleDsh")
+        val bundle = rootProject.file("src/main/resources/dsh-bundle.zip")
+        val dest = rootProject.layout.buildDirectory.dir("instrumented/instrumentCode")
         inputs.file(bundle)
         outputs.dir(dest)
-        doFirst { dest.get().asFile.deleteRecursively() }
-        from(bundle) { rename { "dsh-bundle.zip" } }
+        from(bundle)
         into(dest)
     }
 
     processResources {
         dependsOn("bundleDsh")
+    }
+
+    // Make instrumentedJar depend on copying bundle into instrumented classes dir
+    afterEvaluate {
+        tasks.getByName("instrumentedJar").dependsOn("copyBundleToInstrumented")
     }
 }

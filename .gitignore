@@ -39,3 +39,9 @@ scripts/PACKAGING_LOCAL*.md
 
 # ---- npm 调试残留（手动 build runtime 时可能生成）----
 package-lock.json
+
+# ---- npm / 本地调试残留（不入库）----
+node_modules/
+diag-*.ps1
+reinstall-*.ps1
+*.zip
