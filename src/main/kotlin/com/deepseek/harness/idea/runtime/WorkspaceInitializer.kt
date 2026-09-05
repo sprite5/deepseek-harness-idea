@@ -41,7 +41,7 @@ object WorkspaceInitializer {
             val base = webUrl.trimEnd('/')
             val path = projectPath.replace('\\', '/')
             // 1. 注册/复用当前项目 workspace（幂等）
-            val created = rpc(base, "workspace.create", mapOf("path" to path), auth)
+            val created = rpc(base, "workspace/create", mapOf("path" to path), auth)
             if (!created.ok) {
                 LOG.warn("workspace.create failed: ${created.errorText}")
                 return false
@@ -74,7 +74,7 @@ object WorkspaceInitializer {
 
     /** workspace.list + workspace.insertBefore：把 [workspaceId] 挪到显示顺序最前。 */
     private fun bringToFront(base: String, workspaceId: String, auth: DshBrowserAuth?) {
-        val list = rpc(base, "workspace.list", emptyMap(), auth)
+        val list = rpc(base, "workspace/list", emptyMap(), auth)
         if (!list.ok) {
             LOG.warn("workspace.list failed: ${list.errorText}")
             return
@@ -85,7 +85,7 @@ object WorkspaceInitializer {
         val move = computeBringToFront(order, workspaceId) ?: return // 空列表或已在最前
         val moved = rpc(
             base,
-            "workspace.insertBefore",
+            "workspace/insertBefore",
             mapOf("workspaceId" to move.first, "beforeWorkspaceId" to move.second),
             auth,
         )
@@ -110,7 +110,7 @@ object WorkspaceInitializer {
                 "type" to "client-request",
                 "rpcId" to rpcId,
                 "method" to method,
-                "payload" to payload,
+                "payload" to mapOf("args" to payload),
             )
         )
         val conn = if (auth != null) auth.open("/api/$method", "POST", body)
