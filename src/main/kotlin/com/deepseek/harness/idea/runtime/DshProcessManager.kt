@@ -195,14 +195,14 @@ class DshProcessManager(
         // otherwise the subsequent workspace RPC uses an unauthenticated connection and dsh rejects it with 401,
         // causing "DSH started but workspace not injected".
         if (auth != null && token != null) {
-            repeat(HEALTH_MAX_TRIES) {
+            for (attempt in 0 until HEALTH_MAX_TRIES) {
                 if (auth.isReady) break
                 if (stopRequested.get()) return
                 if (auth.authenticate(token)) {
                     LOG.info("dsh BrowserAuth: cookie obtained for workspace injection")
                     break
                 }
-                LOG.warn("dsh BrowserAuth: token exchange failed, retrying...")
+                LOG.warn("dsh BrowserAuth: token exchange failed (attempt " + (attempt + 1) + "), retrying...")
                 try { Thread.sleep(HEALTH_INTERVAL_MS) } catch (_: InterruptedException) { return }
             }
             if (!auth.isReady) {
