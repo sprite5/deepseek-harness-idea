@@ -304,9 +304,26 @@ class DshHomeManager : Disposable {
         }
     }
 
-    /** 顶层 node_modules junction（缺失才建；指向运行时 dsh 树，供 mcp-ide-server.mjs 解析 SDK）。 */
+    /**
+     * 顶层 node_modules junction（缺失才建；指向运行时 dsh 树，供 mcp-ide-server.mjs 解析 SDK）。
+     * 注意：若 profiles/node_modules/ 是空目录（遗留），会阻断 ESM 向上遍历找到 home/node_modules junction，
+     * 导致 dsh-mobile-hanui 等包解析失败。发现空目录时先删掉再创建 junction。
+     */
     private fun ensureTopLevelNodeModules(home: Path) {
         val link = home.resolve("node_modules")
+
+        // 空 profiles/node_modules/ 阻断 ESM 向上遍历命中 home/node_modules junction，必须删除
+        val profilesNm = home.resolve("profiles/node_modules")
+        if (Files.isDirectory(profilesNm)) {
+            try {
+                Files.newDirectoryStream(profilesNm).use { stream ->
+                    if (!stream.iterator().hasNext()) {
+                        Files.delete(profilesNm)
+                    }
+                }
+            } catch (_: Exception) { }
+        }
+
         if (Files.exists(link)) return
         val target = runtimeRoot().resolve("dsh/node_modules")
         if (!Files.isDirectory(target)) {
