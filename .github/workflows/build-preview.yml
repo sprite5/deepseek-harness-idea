@@ -14,7 +14,7 @@ permissions:
 env:
   JAVA_VERSION: '21'
   NPM_REGISTRY: 'https://registry.npmmirror.com/'
-  DSH_VERSION: '0.1.1-rc.2'
+  DSH_VERSION: '0.1.2-rc.1'
   HANUI_VERSION: '0.2.5'
 
 jobs:
@@ -74,11 +74,17 @@ jobs:
       - name: Build plugin zip
         run: ./gradlew buildPlugin --no-daemon
 
-      # buildPlugin 产物名是 <plugin-name>-<version>.zip；改名为 universal
-      - name: Rename zip to universal
+      # buildPlugin 产物名是 <plugin-name>-<version>.zip；改名为 <plugin-name>-<version>-dsh-<dsh-version>.zip
+      - name: Rename zip with dsh version
         run: |
+          PLUGIN_VERSION=$(node -e 'const m = fs.readFileSync("build.gradle.kts", "utf8").match(/version\s*=\s*"([^"]+)"/); console.log(m ? m[1] : "unknown");')
+          echo "Plugin Version: ${PLUGIN_VERSION}"
+          echo "DSH Version: ${{ env.DSH_VERSION }}"
+          TARGET_NAME="dsh-idea-simple-${PLUGIN_VERSION}+dsh${{ env.DSH_VERSION }}.zip"
           cd build/distributions
-          mv dsh-idea-simple-*.zip dsh-idea-simple-universal-0.1.7.zip
+          ORIGINAL_ZIP=$(ls dsh-idea-simple-*.zip | head -n 1)
+          echo "Renaming ${ORIGINAL_ZIP} to ${TARGET_NAME}"
+          mv "${ORIGINAL_ZIP}" "${TARGET_NAME}"
           ls -la
 
       - uses: actions/upload-artifact@v4

@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.deepseek.harness"
-version = "0.1.7-macfix"
+version = "0.1.8"
 
 // v0.1.7 起 universal plugin zip（无平台后缀，跨所有 OS/arch）。
 // gradle-intellij-plugin 默认产物名 = <plugin-name>-<version>.zip，无法直接通过
