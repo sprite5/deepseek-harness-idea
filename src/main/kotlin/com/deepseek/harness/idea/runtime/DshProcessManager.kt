@@ -191,11 +191,22 @@ class DshProcessManager(
         val auth = browserAuth
         val token = launchToken
         // dsh 0.1.2+：先换 cookie，再用 cookie 做健康检查
-        if (auth != null && token != null && !auth.isReady) {
-            if (!auth.authenticate(token)) {
-                LOG.warn("dsh BrowserAuth failed; retrying...")
+        // dsh 0.1.2+: workspace.create needs a valid cookie. Block on BrowserAuth readiness,
+        // otherwise the subsequent workspace RPC uses an unauthenticated connection and dsh rejects it with 401,
+        // causing "DSH started but workspace not injected".
+        if (auth != null && token != null) {
+            repeat(HEALTH_MAX_TRIES) {
+                if (auth.isReady) break
+                if (stopRequested.get()) return
+                if (auth.authenticate(token)) {
+                    LOG.info("dsh BrowserAuth: cookie obtained for workspace injection")
+                    break
+                }
+                LOG.warn("dsh BrowserAuth: token exchange failed, retrying...")
                 try { Thread.sleep(HEALTH_INTERVAL_MS) } catch (_: InterruptedException) { return }
-                // 不 return — 下次循环再试
+            }
+            if (!auth.isReady) {
+                LOG.warn("dsh BrowserAuth: gave up after retries; workspace injection will likely fail")
             }
         }
         repeat(HEALTH_MAX_TRIES) {
