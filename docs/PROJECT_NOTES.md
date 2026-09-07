@@ -109,7 +109,12 @@ src/main/resources/
 
 ### 3.4 其他
 
-- composer 是标准 React 受控 `<textarea>`：外部注入需原生 setter + `input` 事件（`dispatchEvent(new Event('input',{bubbles:true}))`）。
+- dsh composer：
+  - **dsh 0.1.0-rc.7 / 0.1.1-rc.2**：标准 React 受控 `<textarea>`，原生 setter + `input` 事件即可驱动（`dispatchEvent(new Event('input',{bubbles:true}))`）；
+  - **dsh web 升级后**（用户实测）：Lexical 富文本编辑器，`<div contenteditable="true" role="textbox" data-composer-input="true">`；
+    注入走 `document.execCommand('insertText', false, text)`（Lexical/Slate/ProseMirror 等 contenteditable 框架
+    统一接受的"用户输入"模拟入口，会走它们自己的 input pipeline、自动维护光标位置）。
+  - `injectToBrowser` 选择器降级：`[data-composer-input]` → `div[contenteditable="true"][role="textbox"]` → `textarea`。
 - MCP SDK：`@modelcontextprotocol/sdk@1.30.0`（ESM；`StreamableHTTPServerTransport` + `createMcpExpressApp`，stateless 模式 `sessionIdGenerator: undefined`）。
 - 网络：本机 npm 走 `registry.npmmirror.com`（`npm_config_registry`）；curl/Invoke-WebRequest 常失败，**用 node fetch 最稳**（`scripts/download-node.mjs` 即如此）。
 

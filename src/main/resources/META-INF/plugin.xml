@@ -82,6 +82,19 @@
 
     <change-notes><![CDATA[
         <h3>English / 中文</h3>
+        <h4>v0.1.10</h4>
+        <ul>
+            <li>Fix "Send Selection to DSH" not filling the composer on dsh web ≥ 0.1.2 (Lexical rich
+            text editor): the JCEF injection now picks <code>[data-composer-input]</code> /
+            <code>div[contenteditable="true"][role="textbox"]</code> and writes via
+            <code>document.execCommand('insertText', ...)</code> as the unified contentEditable entry,
+            with <code>&lt;textarea&gt;</code> kept as a fallback for older dsh web versions.</li>
+            <li>修复"Send Selection to DSH"在 dsh web ≥ 0.1.2（Lexical 富文本编辑器）下无法填入
+            composer 的问题：JCEF 注入脚本改为先匹配 <code>[data-composer-input]</code> /
+            <code>div[contenteditable="true"][role="textbox"]</code>，并通过
+            <code>document.execCommand('insertText', ...)</code> 写入；保留
+            <code>&lt;textarea&gt;</code> 作为老版本 dsh web 的兜底。</li>
+        </ul>
         <h4>v0.1.2</h4>
         <ul>
             <li>JCEF compatibility on IntelliJ 2026.2: added an (optional) dependency on the bundled

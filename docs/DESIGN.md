@@ -241,7 +241,7 @@ dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录�
 - 编辑器右键动作"发送选中代码到 DSH"（`SendSelectionAction`，注册于 `EditorPopupMenu`，见 plugin.xml `<actions>`）：
   1. `ReadAction` 读选中文本/文件/语言（≤64KB，超出截断并注明 `…(已截断)`）；
   2. **直接写入 Bridge 的 sent-selection 队列**（`SentSelectionQueue`：容量 ≤10 条、单条 ≤64KB，环形淘汰）——智能体可随时经 `ide_get_sent_selection` 取回，**必达**；
-  3. 聚焦工具窗口 + JCEF 注入预填 composer：轮询等待 dsh web 的 `<textarea>`（实测为 React 受控组件），原生 setter 设置 value + 派发 `input` 事件（触发 React onChange）；
+  3. 聚焦工具窗口 + JCEF 注入预填 composer：选择器降级 `[data-composer-input]`（Lexical 富文本 composer，dsh web 升级后） → `div[contenteditable="true"][role="textbox"]` → `<textarea>`（dsh 0.1.0-rc.7 / 0.1.1-rc.2 兼容）；命中 contenteditable 走 `document.execCommand('insertText', false, ref)`（Lexical/Slate/ProseMirror 通用"用户输入"模拟入口），命中 textarea 走原生 setter + `input` 事件（见 §3 表格）；
   4. 注入失败/未运行 → 系统剪贴板 + 通知"请粘贴到输入框（代码已就绪）"。
 - **紧凑文件引用**（v0.5.4，用户反馈迭代）：注入内容仅 `@绝对路径#L起始-结束` + 尾随换行
   （`buildCompactReference`），**无提示语、无代码本体**；注入后光标 `setSelectionRange` 移到

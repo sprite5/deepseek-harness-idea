@@ -500,24 +500,50 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         return sb.toString()
     }
 
-    /** JCEF 注入：轮询 dsh web 的 composer textarea，设置值、触发 React input 事件、光标移到末尾（下一行）。 */
+    /**
+     * JCEF 注入：把紧凑引用填入 dsh composer。
+     *
+     * - dsh 0.1.0-rc.7 / 0.1.1-rc.2：composer 是受控 `<textarea>`，原生 setter + `input` 事件即可；
+     * - 当前版本（dsh web 升级后）：composer 是 Lexical 富文本编辑器（`<div contenteditable="true"
+     *   role="textbox" data-composer-input="true">`）。`document.execCommand('insertText', ...)` 是
+     *   Lexical / Slate / ProseMirror 等 contenteditable 框架统一接受的"用户输入"模拟入口，会
+     *   走它们的 input pipeline、自动滚动光标到插入末尾并维持光标位置，比手工 dispatch input
+     *   事件更接近真实键入。
+     *
+     * 选择器降级顺序（首个命中即用）：
+     *   1) `[data-composer-input]` —— dsh Lexical composer 的稳定 hook
+     *   2) `div[contenteditable="true"][role="textbox"]` —— 通用富文本 composer
+     *   3) `textarea` —— 老版本 dsh 兼容
+     *
+     * 8s 内仍未命中 → 让脚本静默退出（Java 端 `executeInPage` 仍返回 true；调用方按既有逻辑走剪贴板兜底
+     * —— `bridge.pushSentSelection` 已经把完整代码写到队列，JCEF 注入只是把引用填入输入框，
+     * 智能体也可通过 `mcp__ide__getSentSelection` 取回）。
+     */
     private fun injectToBrowser(selection: String): Boolean {
         val json = escapeJs(selection)
         val script = """
             (() => {
               const deadline = Date.now() + 8000;
               const text = $json;
+              const pickComposer = () =>
+                    document.querySelector('[data-composer-input]')
+                    || document.querySelector('div[contenteditable="true"][role="textbox"]')
+                    || document.querySelector('textarea');
               const tryInject = () => {
-                const ta = document.querySelector('textarea');
-                if (!ta) { if (Date.now() < deadline) setTimeout(tryInject, 300); return; }
-                const proto = window.HTMLTextAreaElement.prototype;
-                const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-                setter.call(ta, text);
-                ta.dispatchEvent(new Event('input', { bubbles: true }));
-                // 光标移到文本末尾（引用行之后的新行），等待直接输入问题
-                const pos = ta.value.length;
-                ta.setSelectionRange(pos, pos);
-                ta.focus();
+                const el = pickComposer();
+                if (!el) { if (Date.now() < deadline) setTimeout(tryInject, 300); return; }
+                el.focus();
+                if (el.tagName === 'TEXTAREA') {
+                  // 老版本 dsh 受控 textarea
+                  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                  setter.call(el, text);
+                  el.dispatchEvent(new Event('input', { bubbles: true }));
+                  const pos = el.value.length;
+                  el.setSelectionRange(pos, pos);
+                } else {
+                  // Lexical / Slate / ProseMirror 等 contenteditable：execCommand 走框架的 input pipeline
+                  document.execCommand('insertText', false, text);
+                }
               };
               tryInject();
             })();
