@@ -189,6 +189,7 @@ class DshHomeManager : Disposable {
         writeIfAbsent(web.resolve("cordis.patch.yml"), "# 本层由插件通过 --patch 覆盖，不在此修改\n[]\n")
         writeIfAbsent(home.resolve(IDE_PATCH_FILE), "[]\n")
         deployMobileShellPlugin()
+        pruneRedundantClientPlugins()
         ensureTopLevelNodeModules(home)
         deployMcpServer(home)
         // 方案 A：把全局唯一配置复制到本子目录（dsh 从子目录读；全局为真源；dsh 内改动下次启动被全局覆盖）
@@ -301,6 +302,21 @@ class DshHomeManager : Disposable {
     private fun writeUtf8IfChanged(path: Path, content: String) {
         if (!Files.exists(path) || Files.readString(path, StandardCharsets.UTF_8) != content) {
             writeUtf8(path, content)
+        }
+    }
+
+    /**
+     * 裁剪随包 dsh 树里 IDEA 工具窗用不上的 client 插件行（幂等，见 [DshClientPluginPruner]）。
+     *
+     * 位置说明：必须在 [hasRuntime] 之后调用 —— 首次使用会从 `dsh-bundle.zip` 解压运行时树，
+     * 只有解压完成后裁剪才作用在真实文件上（[ensureHome] 的调用点满足该顺序）。
+     * 失败仅告警不阻断：最坏结果只是这几个插件照旧出现在 Web 设置→插件 列表里。
+     */
+    private fun pruneRedundantClientPlugins() {
+        try {
+            DshClientPluginPruner.pruneRuntime(runtimeRoot())
+        } catch (e: Exception) {
+            LOG.warn("client plugin pruning failed (non-fatal)", e)
         }
     }
 

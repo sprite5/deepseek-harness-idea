@@ -237,6 +237,22 @@ dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录�
 - MCP server（`mcp-ide-server.mjs`）部署在 DSH_HOME 顶层；插件在 DSH_HOME 顶层创建 `node_modules` junction → runtime dsh 树，使 ESM 能向上解析 `@modelcontextprotocol/sdk`（dsh 自愈的 `profiles/node_modules` 不在 ESM 向上查找路径上，实测必需）。
 - `failOnStartupError: true`（测试/诊断形态）：MCP 连接或工具同步失败即拒绝启动，用于冒烟验证。
 
+**随包插件裁剪（IDEA 场景默认不包含右侧栏两个 tab 类型）**：
+
+- dsh web 的浏览器插件名册由各 bundle 的 `cordis.patch.yml` 以 `- insert:` 声明（4 个 sidebar 插件在
+  `@deepseek-ai/dsh-web-app/cordis.patch.yml`）。而 cordis 的 patch 语义
+  （`dsh-app-boot/lib/index.js:applyEntryPatches`）只能"按 id 覆盖字段 / insert 新条目"，**没有删除操作**：
+  从 `--patch` / profile 层无论怎么写都只能标 `disabled: true`，插件列表里仍会出现"已禁用"卡片。
+  要真正"默认不包含"，只能在合成之前把行从 bundle patch 里删掉（行不存在 → 不加载 → 列表里也不出现）。
+- `DshClientPluginPruner`（由 `DshHomeManager.ensureHome` 调用；幂等 + 临时文件原子替换，避免并发启动的
+  另一个项目读到写了一半的 patch）删除两行：`ui-sidebar-files`（右侧栏的工作区文件树 tab）与
+  `ui-sidebar-documentpreview`（右侧栏的 Markdown/代码/PDF 预览 tab）——IDEA 自带工程树与编辑器，
+  工具窗内冗余；聊天区文件点击已由 `buildInterceptFileClickScript` 在 DOM 捕获阶段拦下改为在 IDEA 编辑器打开。
+- **不能裁的两个（硬约束）**：`ui-sidebar`（左）承载会话多级树 / 工作区 / 新建会话 / 底部设置入口，是工具窗内
+  **唯一**的会话切换与 Web 设置入口；`ui-sidebar-right` 提供 `sidebarRight` 服务，而 `dsh-client-ui-chat` 把它
+  写进 `inject` 必需依赖（`inject = [..., "sidebarRight"]`）——禁用或删除会让 chat 的 fiber 永不 apply，
+  聊天区整个不渲染（不是少个面板，是没得聊）。
+
 ### 3.7 代码上下文发送
 
 - 编辑器右键动作"发送选中代码到 DSH"（`SendSelectionAction`，注册于 `EditorPopupMenu`，见 plugin.xml `<actions>`）：

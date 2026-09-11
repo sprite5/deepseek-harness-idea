@@ -146,6 +146,30 @@ src/main/resources/
 
 ---
 
+### 3.6 client 插件名册与"默认不包含某几个插件"（0.1.5-rc.2 源码实测，2026-09-11）
+
+- **名册来源**：dsh web 的浏览器插件由各 bundle 的 `cordis.patch.yml` 以 `- insert:` 条目声明
+  （`@deepseek-ai/dsh-web-app/cordis.patch.yml` 里 4 个 sidebar 插件：`ui-sidebar`、`ui-sidebar-right`、
+  `ui-sidebar-documentpreview`、`ui-sidebar-files`）。设置→插件（Plugin list）是** Loader 条目的投影**
+  （`dsh-host-plugin-inventory`），不是 node_modules 目录的投影。
+- **patch 语义**：`dsh-app-boot/lib/index.js:applyEntryPatches` 只支持「按 id 覆盖字段」与「insert」，**没有
+  删除条目的操作** → 从 `--patch` / profile 层只能写 `disabled: true`（卡片仍在，牌子变"已禁用"）；
+  要"默认不包含"，只能在合成前把行从 bundle patch 里删掉。
+- **硬约束（别再踩）**：`ui-sidebar-right` 不能禁/删 —— `@deepseek-ai/dsh-client-ui-chat` 的
+  `inject` 把它提供的 `sidebarRight` 列为**必需依赖**（`inject = [..., "sidebarRight"]`），缺失会让 chat 的
+  fiber 永不 apply，**聊天区整个不渲染**。`ui-sidebar`（左）也不能删：会话多级树/工作区/新建会话/底部设置入口
+  全在里面，是工具窗内唯一的会话切换与 Web 设置入口。可安全裁剪的只有两个叶子行
+  （`ui-sidebar-documentpreview` / `ui-sidebar-files`：它们只 `inject` `sidebarRightTabs` 并向其注册 tab 类型，
+  `documentPreviews` 服务也只有自己用）。
+- **实现**：`DshClientPluginPruner`（`DshHomeManager.ensureHome` 调用；幂等；临时文件 + 原子替换，
+  因运行时树所有项目共享、并发启动时不能读到半个 patch 文件）。裁剪后这两个插件既不加载、也不出现在插件列表。
+- **IDEA 侧为何安全**：聊天区的文件点击已由 `buildInterceptFileClickScript` 在 DOM **捕获阶段**
+  `stopImmediatePropagation` 拦下并在 IDEA 编辑器打开，选择器覆盖 ui-chat / ui-tool / ui-deliverables /
+  ui-reference 实际使用的 `fileMention` / `filePath` / `_fileLink` 类名 —— 所以 `ctx.sidebarRight.openResource`
+  在 IDEA 里基本不会被触发（未被拦到的元素点击会因"无 tab 类型认领"抛错、表现为无反应）。
+
+---
+
 ## 4. 踩坑记录（含修复）
 
 | 坑 | 现象 | 根因 / 修复 |
