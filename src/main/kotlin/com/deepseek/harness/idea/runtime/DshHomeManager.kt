@@ -27,7 +27,7 @@ class DshHomeManager : Disposable {
         private val LOG = Logger.getInstance(DshHomeManager::class.java)
 
         /** 固定 dsh 版本（升级 = 换版本 + 重建运行时，见 DESIGN §3.2） */
-        const val DSH_VERSION = "0.1.2-rc.1"
+        const val DSH_VERSION = "0.1.5-rc.2"
 
         /** 开发态覆盖：DSH_IDEA_RUNTIME=<目录> 直接使用该目录下的 node/ 与 dsh/ */
         const val RUNTIME_OVERRIDE_ENV = "DSH_IDEA_RUNTIME"

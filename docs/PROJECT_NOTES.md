@@ -2,8 +2,9 @@
 
 > 本文汇总 DeepSeek Harness IDEA 插件开发过程中的**实测环境事实、踩坑记录、dsh 行为结论**，
 > 供后续任务（Step 6 评审及之后的维护/升级）直接参考，避免重复调查。
-> 最后更新：2026-08-23（v0.1.3-dev：切换项目工作区根治/每项目隔离 DSH_HOME、dsh 0.1.1-rc.2 升级与回归、
-> 运行日志一键解释、方案C回退方案A、旧 session/投影缓存升级迁移、API Key 脱敏回显 + 全局生效同步）
+> 最后更新：2026-09-11（v0.1.11+dsh0.1.5-rc.2：运行时升级到 RC2；
+> IntelliJ 兼容声明调整为 2025.1–2026.2 / build 251–262.*；构建与依赖验证见 §1/§3.5；
+> ⚠️ 真实 dsh web UI / composer / 凭据同步等交互仍需在 RC2 的 IDE 会话中复验）
 
 ---
 
@@ -11,14 +12,14 @@
 
 | 项 | 结论 |
 |---|---|
-| 目标 IDE | IntelliJ IDEA Community/Ultimate **2024.1+**（`intellij.version = 2024.1.7`，since-build 241，until **262.\***；可用 `-PplatformVersion=2026.2` 做前向编译检查） |
+| 目标 IDE | IntelliJ IDEA Community/Ultimate **2025.1–2026.2**（since-build 251，until **262.\***）；受 `org.jetbrains.intellij` 1.17.4 限制，默认仍以已验证的 `intellij.version = 2024.1.7` 编译，升级编译 SDK需先迁移 Gradle 插件 2.x；可用 `-PplatformVersion=2026.2` 做前向实验检查 |
 | 构建 JDK | **必须 JBR 21**：`D:\develop\IntelliJ IDEA 2024.3.4.1\jbr`（`instrumentCode` 需要 JBR 布局；jdk-17 会报 `D:\develop\Java\jdk-17\Packages does not exist`） |
 | Gradle | `tooling/gradle-8.14/bin/gradle.bat`（自带发行版）；**勿用系统 gradle-7.2**（native 库初始化失败且过旧） |
 | Gradle 用户目录 | `GRADLE_USER_HOME=D:\develop\gradle-7.2\.gradle\repository`（缓存已就位，含 ideaIC 2024.1.7 约 1GB） |
 | 运行时开发目录 | `tooling/runtime-dev`（`DSH_IDEA_RUNTIME` 指向它）；`build/runtime` 是构建产物（含 bundle） |
 | 自动化沙箱 | pwsh 沙箱拦截工作区外读写与部分出站网络 → **gradle/npm 命令需完整沙箱权限**（仅自动化环境；用户本机无此限制） |
 | 一键打包 | `scripts/build-plugin.bat`（双击；自动探测 JBR/Gradle 缓存，`--no-daemon`，输出产物路径） |
-| 版本号 | 插件版本 = `build.gradle.kts` 第 13 行 `version`；`DshHomeManager.DSH_VERSION`（= dsh 运行时版本 `0.1.1-rc.2`，决定生产运行时目录名；勿随意改，升级=重建运行时） |
+| 版本号 | 插件版本 = `build.gradle.kts` 第 13 行 `version`；`DshHomeManager.DSH_VERSION`（= dsh 运行时版本 `0.1.5-rc.2`，决定生产运行时目录名；勿随意改，升级=重建运行时） |
 | 前向编译检查 | `tooling\gradle-8.14\bin\gradle.bat compileKotlin --no-daemon -PplatformVersion=2026.2`（下载 ideaIC 2026.2 约 1.5GB 到 Gradle 缓存；新平台自带 Kotlin 模块 metadata 高于 2.0.21，已加 `-Xskip-metadata-version-check`；JCEF 自 2026.2 起拆分为内置插件 `com.intellij.modules.jcef`，检查时需列入 `plugins`） |
 
 ### 常用命令（自动化环境需完整权限）
@@ -72,7 +73,7 @@ src/main/resources/
 
 ---
 
-## 3. dsh 行为事实（0.1.1-rc.2 实测结论；早期 0.1.0-rc.7 结论经 0.1.1-rc.2 复验兼容）
+## 3. dsh 行为事实（0.1.1-rc.2 实测结论；RC1 部分复验；**0.1.5-rc.2 待 IDE 复验**）
 
 ### 3.1 启动与 patch
 
@@ -115,8 +116,33 @@ src/main/resources/
     注入走 `document.execCommand('insertText', false, text)`（Lexical/Slate/ProseMirror 等 contenteditable 框架
     统一接受的"用户输入"模拟入口，会走它们自己的 input pipeline、自动维护光标位置）。
   - `injectToBrowser` 选择器降级：`[data-composer-input]` → `div[contenteditable="true"][role="textbox"]` → `textarea`。
+  - **"一键解释"（`sendQuestion` / `buildSendQuestionScript`）曾漏改**（2026-09-11 用户截图报障）：
+    v0.1.10 只切了 `injectToBrowser`，`sendQuestion` 仍 `document.querySelector('textarea')`——
+    dsh 0.1.5-rc.1 页面里已无 textarea，8s 后回传 `no-composer` → 剪贴板兜底 + 通知
+    **"Auto-send failed; the log was copied to the clipboard."**
+    （已装包 `instrumented-dsh-idea-simple-win-0.1.11.jar` 内 `DshToolWindowPanel.class` 反查确认：
+    同一个 class 里两套脚本一新一旧）。修复：两条路径共用同一套选择器 + `readText`
+    （contenteditable 读 `innerText`），回车派发到 composer 本体，写入无效才回传 `no-composer`。
+    **教训：dsh composer 选择器有两处注入（`injectToBrowser` / `buildSendQuestionScript`），必须同时改。**
 - MCP SDK：`@modelcontextprotocol/sdk@1.30.0`（ESM；`StreamableHTTPServerTransport` + `createMcpExpressApp`，stateless 模式 `sessionIdGenerator: undefined`）。
 - 网络：本机 npm 走 `registry.npmmirror.com`（`npm_config_registry`）；curl/Invoke-WebRequest 常失败，**用 node fetch 最稳**（`scripts/download-node.mjs` 即如此）。
+
+---
+
+### 3.5 dsh 0.1.5-rc.2 升级待复验项（2026-09-11）
+
+`§3` 各小节的具体行为结论是在 dsh **0.1.1-rc.2** 上实测的，升级到 **0.1.5-rc.2** 后已重跑构建与 Kotlin 单测且全部通过，但**仍需在真实 IDE 会话里验证**。需在 0.1.5-rc.2 IDE 上重测的事项：
+
+| 项 | 原 `0.1.1-rc.2` 结论 | 0.1.5-rc.2 复验要点 |
+|---|---|---|
+| composer 选择器 | `[data-composer-input]` / `contenteditable` / `<textarea>` 三段降级 | **已复验（2026-09-11，dsh 0.1.5-rc.1）**：`[data-composer-input]` 仍命中（Lexical `contenteditable`），页面**已无 `<textarea>`**；`injectToBrowser`（发送选中代码）正常，`buildSendQuestionScript`（一键解释）漏改 → 一键解释必然失败，v0.1.11 修复 |
+| 输入框不支持"文件引用 chip" | 紧凑引用方案 + sent-selection 兜底 | 0.1.5 是否已原生支持；如支持可省 sent-selection 兜底逻辑 |
+| `workspace.insertBefore` RPC | 把当前项目挪到最前 | 0.1.5 是否改 RPC 名或参数（`WorkspaceInitializerTest` 12/12 过，参数层 OK） |
+| `?token=<launchToken>` 启动 URL | PortParser 正则解析 | 0.1.5 是否变 token 形态（`PortParserTest` 4/4 过，正则层 OK） |
+| BrowserAuth cookie 换发 | DshBrowserAuth 一次 token→cookie 交换 | 0.1.5 是否改 cookie HMAC 算法或 authority-bound 校验 |
+| 凭据文件 `$settings`/`$credentials` 共享 | McpPatchGenerator 用 cordis patch 写 `settings-file.path`/`credentials-local.path` 指向全局 | 0.1.5 cordis 是否仍支持 `$id` patch（`McpPatchGeneratorTest` 6/6 过，patch 语法层 OK） |
+
+构建侧已确认：`pi-ai` 0.85.1 仍 export `./api/anthropic-messages`（导出 `stream`/`streamSimple`），anthropic provider 链路无破坏；`@earendil-works/pi-ai` 在 dsh 0.1.5-rc.2 里是 `dsh-llm-pi-ai` 的间接依赖（devDeps），`npm install --include=dev` 才会装，已在 `prepare-dsh-cache.mjs` / `build-dsh.mjs` 显式声明。
 
 ---
 
@@ -159,7 +185,7 @@ src/main/resources/
   3. 修改后**重启 IDE**。
   - v0.1.1 起工具窗口 JCEF 失败提示会附带异常信息与上述排查建议（`error.jcef.hint`），便于用户在真实会话自诊。
 - 前向编译检查：`-PplatformVersion=2026.2` 时把 `plugins/jcef-plugin/lib/**/*.jar` 加入 compile classpath
-  （`build.gradle.kts` 条件依赖），2024.1 默认构建不受影响（JCEF 在 app-client.jar）。
+  （`build.gradle.kts` 条件依赖）；当前最低目标 2025.1 的 JCEF 仍在平台核心（app-client.jar）。
 - `LanguageUtil.getLanguageForFile(vf)` 不存在 → `getLanguageForPsi(project, vf)`。
 - `Document` 无 `isModified` → `FileDocumentManager.isDocumentUnsaved(doc)`；Document 无 `selectionModel` → 用 `(FileEditorManager.selectedEditor as? TextEditor)?.editor`。
 - `VfsUtil.visitChildrenRecursively` 不存在 → `VfsUtilCore.visitChildrenRecursively` + `VirtualFileVisitor`（**`visitFile` 返回 `Boolean`**，false=跳过 children；不是 Result）。

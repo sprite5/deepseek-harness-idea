@@ -24,7 +24,7 @@ import java.util.UUID
  *
  * 实测：
  * - dsh 0.1.0-rc.7 ~ 0.1.1-rc.2：127.0.0.1 loopback 信任围栏放行，无需鉴权头
- * - dsh 0.1.2-rc.1+：BrowserAuth，所有 `api` RPC 也要带 cookie（见 `DshBrowserAuth`）
+ * - dsh 0.1.2-rc.1+（当前 0.1.5-rc.2）：BrowserAuth，所有 `api` RPC 也要带 cookie（见 `DshBrowserAuth`）
  * - RPC gateway 要求 payload 结构为 `{type: "client-request", rpcId, method, payload: {args: {request: {...}}}}`
  */
 object WorkspaceInitializer {

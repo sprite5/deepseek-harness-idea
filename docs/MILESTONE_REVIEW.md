@@ -79,7 +79,7 @@ US-01～US-10 均有对应实现；其中 US-01/02/04/06/07/10 的**最终体验
 
 | # | 事项 | 对应验收项/故事 | 自动化已覆盖部分 |
 |---|---|---|---|
-| A-1 | zip 安装到独立 IDEA 2024.1+（Windows）无报错，首次打开自动解压运行时（≈62s） | PRD §7-1 / US-01 | zip 结构已验证（plugin.jar + kotlin-stdlib + annotations + runtime-bundle.zip）；解压幂等逻辑有单测 |
+| A-1 | zip 安装到独立 IDEA 2025.1–2026.2（Windows）无报错，首次打开自动解压运行时（≈62s） | PRD §7-1 / US-01 | zip 结构已验证（plugin.jar + kotlin-stdlib + annotations + runtime-bundle.zip）；解压幂等逻辑有单测 |
 | A-2 | 真实 API Key 对话；智能体读/建/改项目文件 | PRD §7-2/3 / US-02/04 | 凭据链路自动化；cwd/工作区预注册冒烟验证 |
 | A-3 | 审查面板 DiffManager UI 交互与还原 | PRD §7-4 / US-07 | SnapshotDiffTest 5 例 + ReviewManager 三类还原逻辑 |
 | A-4 | 发送选中代码的 JCEF 注入效果（含失败剪贴板降级） | PRD §7-5 / US-06 | 队列/工具链路自动化；注入脚本按 0.1.0-rc.7 DOM 编写 |

@@ -14,7 +14,7 @@ permissions:
 env:
   JAVA_VERSION: '21'
   NPM_REGISTRY: 'https://registry.npmmirror.com/'
-  DSH_VERSION: '0.1.2-rc.1'
+  DSH_VERSION: '0.1.5-rc.2'
   HANUI_VERSION: '0.2.5'
 
 jobs:
@@ -23,24 +23,26 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      # 缓存 dsh 基础树（~190 JS 包 + 18 native prebuild tarballs）
-      # 版本变才失效，否则全量命中
+      # 缓存完整 dsh 构建树。key 同时绑定 OS、Node、dsh/hanui 版本及构建脚本内容；
+      # 不使用宽泛 restore-keys，避免把旧 dsh 或修复前缺 @anthropic-ai/sdk 的坏树恢复进来。
       - name: Cache dsh tree
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             build/dsh
             build/pack-cache
-          key: dsh-tree-${{ env.DSH_VERSION }}-${{ env.HANUI_VERSION }}
-          restore-keys: |
-            dsh-tree-${{ env.DSH_VERSION }}-
-            dsh-tree-
+          key: dsh-tree-${{ runner.os }}-node24-${{ env.DSH_VERSION }}-${{ env.HANUI_VERSION }}-${{ hashFiles('scripts/prepare-dsh-cache.mjs', 'scripts/build-dsh.mjs') }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
+        with:
+          # Node 24（当前 LTS，代号 Krypton）。原默认（Node 20）在 GitHub
+          # runner 上已标记 unsupported，且 @earendil-works/pi-ai engines 要求
+          # node>=22.19.0，Node 20 跑 npm install 会触发 EBADENGINE。
+          node-version: '24'
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
@@ -68,26 +70,64 @@ jobs:
             --hanui-version "${{ env.HANUI_VERSION }}" \
             --bundle
 
+      - name: Verify dsh bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s build/dsh-universal.zip
+          unzip -tq build/dsh-universal.zip
+          unzip -Z1 build/dsh-universal.zip | grep -Fx 'dsh/node_modules/@deepseek-ai/dsh/package.json'
+          unzip -Z1 build/dsh-universal.zip | grep -Fx 'dsh/node_modules/@anthropic-ai/sdk/package.json'
+          unzip -Z1 build/dsh-universal.zip | grep -Fx 'dsh/node_modules/@earendil-works/pi-ai/package.json'
+          unzip -Z1 build/dsh-universal.zip | grep -Fx 'dsh/node_modules/dsh-mobile-hanui/package.json'
+
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
       - name: Build plugin zip
         run: ./gradlew buildPlugin --no-daemon
 
-      # buildPlugin 产物名是 <plugin-name>-<version>.zip；改名为 <plugin-name>-<version>-dsh-<dsh-version>.zip
-      - name: Rename zip with dsh version
+      # buildPlugin 当前产物为 dsh-idea-simple-<host>-<version>.zip；严格要求只产出一个 zip，
+      # 再改名为不带 host 后缀的 universal 名称。不要用 `ls | head` 静默选错旧文件。
+      - name: Rename and verify plugin zip
+        shell: bash
         run: |
-          PLUGIN_VERSION=$(node -e 'const m = fs.readFileSync("build.gradle.kts", "utf8").match(/version\s*=\s*"([^"]+)"/); console.log(m ? m[1] : "unknown");')
+          set -euo pipefail
+          PLUGIN_VERSION=$(node -e 'const fs = require("node:fs"); const m = fs.readFileSync("build.gradle.kts", "utf8").match(/^version\s*=\s*"([^"]+)"/m); if (!m) process.exit(1); process.stdout.write(m[1]);')
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != *-preview* && "${GITHUB_REF_NAME}" != "v${PLUGIN_VERSION}" ]]; then
+            echo "Release tag ${GITHUB_REF_NAME} does not match plugin version v${PLUGIN_VERSION}" >&2
+            exit 1
+          fi
+          TARGET_NAME="dsh-idea-simple-${PLUGIN_VERSION}+dsh${DSH_VERSION}.zip"
+          mapfile -t ZIPS < <(find build/distributions -maxdepth 1 -type f -name 'dsh-idea-simple-*.zip' -print)
+          if [[ ${#ZIPS[@]} -ne 1 ]]; then
+            printf 'Expected exactly one plugin zip, found %s:\n' "${#ZIPS[@]}" >&2
+            printf '  %s\n' "${ZIPS[@]:-<none>}" >&2
+            exit 1
+          fi
+          mv "${ZIPS[0]}" "build/distributions/${TARGET_NAME}"
+          PLUGIN_ZIP="build/distributions/${TARGET_NAME}"
+          test -s "${PLUGIN_ZIP}"
+          unzip -tq "${PLUGIN_ZIP}"
+          mapfile -t MAIN_JARS < <(unzip -Z1 "${PLUGIN_ZIP}" | grep -E '/lib/(instrumented-)?dsh-idea-simple[^/]*\.jar$')
+          if [[ ${#MAIN_JARS[@]} -ne 1 ]]; then
+            printf 'Expected exactly one plugin main jar, found %s:\n' "${#MAIN_JARS[@]}" >&2
+            printf '  %s\n' "${MAIN_JARS[@]:-<none>}" >&2
+            exit 1
+          fi
+          TMP_DIR=$(mktemp -d)
+          trap 'rm -rf "${TMP_DIR}"' EXIT
+          unzip -qp "${PLUGIN_ZIP}" "${MAIN_JARS[0]}" > "${TMP_DIR}/plugin.jar"
+          unzip -tq "${TMP_DIR}/plugin.jar"
+          unzip -Z1 "${TMP_DIR}/plugin.jar" | grep -Fx 'META-INF/plugin.xml'
+          unzip -Z1 "${TMP_DIR}/plugin.jar" | grep -Fx 'dsh-bundle.zip'
+          unzip -qp "${TMP_DIR}/plugin.jar" dsh-bundle.zip > "${TMP_DIR}/dsh-bundle.zip"
+          cmp build/dsh-universal.zip "${TMP_DIR}/dsh-bundle.zip"
           echo "Plugin Version: ${PLUGIN_VERSION}"
-          echo "DSH Version: ${{ env.DSH_VERSION }}"
-          TARGET_NAME="dsh-idea-simple-${PLUGIN_VERSION}+dsh${{ env.DSH_VERSION }}.zip"
-          cd build/distributions
-          ORIGINAL_ZIP=$(ls dsh-idea-simple-*.zip | head -n 1)
-          echo "Renaming ${ORIGINAL_ZIP} to ${TARGET_NAME}"
-          mv "${ORIGINAL_ZIP}" "${TARGET_NAME}"
-          ls -la
+          echo "DSH Version: ${DSH_VERSION}"
+          ls -lh "${PLUGIN_ZIP}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: plugin-universal
           path: build/distributions/*.zip
@@ -102,12 +142,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: artifacts/**/*.zip
           generate_release_notes: true

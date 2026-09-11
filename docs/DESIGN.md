@@ -20,7 +20,7 @@
 | IDE Bridge | 插件内的 Kotlin 本地 HTTP 服务，向 MCP server 暴露 IDE 能力 |
 | MCP | Model Context Protocol；dsh 作为 MCP 客户端连接插件提供的 MCP server |
 
-参考源码（本机 `tooling/runtime-dev` 与 dsh profile 目录中的 `@deepseek-ai/dsh@0.1.1-rc.2`）：
+参考源码（本机 `tooling/runtime-dev` 与 dsh profile 目录中的 `@deepseek-ai/dsh@0.1.5-rc.2`；文中其它 `0.1.5-rc.2 / 0.1.1-rc.2 / 0.1.0-rc.7` 实测结论待 RC2 复验，详见 PROJECT_NOTES §3.5）：
 
 - `dsh-web-app/lib/startup.js`：web 命令行 `--host/--port/--trusted-host`；`--port 0` 由 OS 分配
 - `dsh-web-app/lib/index.js:107`：启动成功打印 `dsh web: http://127.0.0.1:<port>`（loopback）
@@ -71,13 +71,13 @@
    拒绝 Web UI 的 set；见 §3.9 与 PROJECT_NOTES §4）。
 4. **Profile 合成**：`profiles/<name>/cordis.yml` 初始为 `[]`，由 bundle 层（`package.json` 的 `dsh.profile.bundles`）+ `cordis.patch.yml` 用户层 + `--patch` 覆盖层合成。插件以 `--patch <ide.yml>` 注入 mcp-client，不污染用户层。
 5. **MCP 客户端**：`@deepseek-ai/dsh-mcp-client` 支持 `transport: streamable-http`；每实例一个 serverName；模型侧工具名为 `mcp__<serverName>__<rawName>`（serverName 须匹配 `^[A-Za-z0-9_-]{1,32}$`）。其依赖 `@modelcontextprotocol/sdk` 存在于 profile 的 hoisted `node_modules`，可被插件附带的 MCP server 脚本 import（脚本置于 DSH_HOME 下按 node 向上查找规则解析）。
-6. **运行时**：固定 `@deepseek-ai/dsh@0.1.1-rc.2` + Node.js 22.x win-x64（与当前环境一致），随插件打包。
+6. **运行时**：固定 `@deepseek-ai/dsh@0.1.5-rc.2` + Node.js 24.x（Node 24 是 GitHub Actions runner LTS），随插件打包。
 
 ## 3. 模块设计
 
 ### 3.1 项目骨架与构建
 
-- Gradle（Kotlin DSL），`org.jetbrains.intellij` **1.17.4**（2.x platform 线未在本网络插件门户解析到且 DSL 不兼容，升级列入技术债 C-1，见 build.gradle.kts 注释与 MILESTONE_REVIEW.md），platformVersion `2024.1`（编译目标，`-PplatformVersion` 可覆盖做前向编译检查），`until-build` 262.*（支持至 IDEA 2026.2），Kotlin 2.0.x，JVM 17（toolchain）。
+- Gradle（Kotlin DSL），`org.jetbrains.intellij` **1.17.4**（2.x platform 线未在本网络插件门户解析到且 DSL 不兼容，升级列入技术债 C-1，见 build.gradle.kts 注释与 MILESTONE_REVIEW.md），platformVersion `2024.1`（受 `org.jetbrains.intellij` 1.17.4 限制的已验证编译 SDK；不代表发布支持下限），`since-build` 251、`until-build` 262.*（声明支持 IDEA 2025.1–2026.2；升级编译 SDK需先迁移 IntelliJ Platform Gradle Plugin 2.x），Kotlin 2.0.x，JVM 17（toolchain）。
 - 包根 `com.deepseek.harness.idea`，子包：
   - `runtime`：DshProcessManager、DshHomeManager、Bootstrap、PortParser、ProcessLog
   - `bridge`：IdeBridgeServer、BridgeApi（请求/响应模型）、BridgeAuth（token）
@@ -115,7 +115,8 @@
 **构建期**（`scripts/build-runtime.ps1`，Gradle task `buildRuntime` 调用；已实现并实测通过）：
 
 1. 下载 Node.js 22.x win-x64（固定版本，SHA-256 校验）→ `<OutputDir>/node/`。
-2. 以 npm 安装 `@deepseek-ai/dsh@0.1.1-rc.2` 及其依赖到 `<OutputDir>/dsh/`（`--ignore-scripts`；
+2. 以 npm 安装 `@deepseek-ai/dsh@0.1.5-rc.2` 及其依赖到 `<OutputDir>/dsh/`（`--ignore-scripts --include=optional --include=dev`；
+   `pi-ai` / `dsh-llm-pi-ai` 在 dsh 里是 devDeps，必须 `--include=dev` 才会装，否则 anthropic provider 链路会 ERR_MODULE_NOT_FOUND；
    win-x64 原生依赖均以 optionalDependencies 预编译产物提供，无需 postinstall）。
 3. 冒烟验证：读取 `dsh` 版本；`-Bundle` 时打包 `runtime-bundle.zip`（**zip 根直接为 `node/` + `dsh/`**，
    排除源 zip 与 npm 缓存；Step 5 已实测 106.9MB、解压 62s）。
@@ -303,16 +304,27 @@ dsh 的 workspace 是**显式注册制**：`storages/workspace.json` 无记录�
 - `DshToolWindowPanel.sendQuestion`（自动提交，**不等待用户确认**）：
   1. 在途守卫（`AtomicBoolean` 防双击）+ token 化回调（`AtomicLong` 防旧回调串台）；
   2. 激活工具窗口并 `setSelectedContent(content 0)` 切到对话页（避免停在日志 tab）；
-  3. JCEF 注入脚本：原生 setter 填 composer → `input` 事件 → 派发 `keydown Enter`
-     （dsh composer 实测：非 shift 的 Enter → `keyboard.submit`，智能体忙时默认入队仍送达）→
-     轮询 ≤3s 判 textarea 清空 = `submitted`；未清空则回退点击
-     `button[aria-label="Send message"/"发送消息"]`（**不用 class 通配**，避免误点运行中的"停止"按钮）；
+  3. JCEF 注入脚本：composer 选择器与 §3.7 注入路径**共用同一套**（`[data-composer-input]` →
+     `div[contenteditable="true"][role="textbox"]` → `<textarea>` 老版本兜底）——dsh web ≥ 0.1.2
+     的 composer 是 Lexical `contenteditable`，**页面里没有 `<textarea>`**；
+     contenteditable 走 `document.execCommand('insertText')`（首轮文本无变化时补一次原生选区重试），
+     textarea 走原生 setter + `input` 事件 → 把非 shift 的 `keydown Enter` 派发到 **composer 本体**
+     （dsh `registerComposerKeymap` 把 Lexical ENTER 命令注册在编辑器根节点，`shiftKey === true` 才换行；
+     智能体忙时默认入队仍送达）→ 轮询 ≤3s 判 composer 文本清空 = `submitted`
+     （contenteditable 读 `innerText`/`textContent`）；未清空则回退点击
+     `button[aria-label="Send message"/"发送消息"/"Queue message"/"排队发送"/"Steer message"/"插话发送"]`
+     （**不用 class 通配**，避免误点运行中的"停止"按钮）；写入后文本未变化 → `no-composer`
+     （**不发回车**——空输入框的空草稿回车手势会被误判成 `submitted`）；
   4. 结果经 **JBCefJSQuery** 回传 `submitted / blocked / no-composer`：`submitted` → 通知已发送；
      `blocked` → 消息留在输入框 + 提示手动回车；其他 → 剪贴板兜底 + 失败通知；
      `setupJsQuery` 必须在 `loadURL` **之前**创建（CEF message router 在页面加载时注入
      `window.<funcName>`；创建失败降级为无验证乐观提示）。
-- 技术边界（实测 dsh 0.1.1-rc.2）：composer 文本区即页面 `<textarea>`（`document.querySelector('textarea')`）；
-  发送按钮 aria-label 实际为 "Send message" / "发送消息"（`t("input.send")`）。
+- 技术边界（**2026-09-11 修正**）：`<textarea>` 结论只对 dsh ≤ 0.1.1-rc.2 成立。dsh web ≥ 0.1.2 的
+  composer 是 Lexical `contenteditable`（`<div contenteditable="true" role="textbox" aria-multiline="true"
+  data-composer-input="true">`，源码 `dsh-client-ui-conversation/lib/client.js` 的 `ComposerContentEditable`），
+  **页面里已不存在 `<textarea>`**：只查 textarea 的脚本必然 8s 后回传 `no-composer` → 剪贴板兜底
+  （v0.1.11 修复的正是"一键解释"这条漏改路径）；发送按钮 aria-label 实际为 "Send message" /
+  "发送消息"（`t("input.send")`），运行中主按钮变 "停止"/"Stop"（`primaryStops`）。
 
 ## 4. 接口契约
 
@@ -516,3 +528,4 @@ PRD §7 验收清单 9 条（含 v0.1.3-dev 新增"DSH 一键解释"）。
 | 2026-08-23 | v0.1.3-dev | **设置页 API Key 脱敏回显**（用户要求"显示前 6 位 + 中间脱敏 + 后 6 位"）：`DshCredentials.maskApiKey(key)` —— 前 6 位 + `******` + 后 6 位（≤12 位整段脱敏）；`DshSettingsConfigurable` 回显脱敏串（改用 `JBTextField`，否则 `JBPasswordField` 把文本渲染成掩码点，用户看不到脱敏串），`isModified`/`apply` 用"字段内容 ≠ 当前脱敏串"判定用户是否真的改了 key，避免把脱敏串当真实 key 写回密码库。新增 DshCredentialsMaskTest 6 例 |
 | 2026-08-23 | v0.1.3-dev | **设置页回显兜底：凭据文件读取**（用户实测"改后仍为空"）：PasswordSafe 读不到 key 时设置页回显为空。`DshCredentials.readApiKeyFromCredentialFile`（行级解析）＋ `readApiKeyWithFallback`（先 PasswordSafe，无则回退插件全局凭据文件，方案A真源）；设置页 `readStoredApiKey()` 用它。DshCredentialsMaskTest 增至 10 例 |
 | 2026-08-23 | v0.1.3-dev | **dsh Web UI 改 API key 也要全局生效**（用户要求+选B方案）：① 去掉 `DshProcessManager` 启动时注入的 `DEEPSEEK_API_KEY` 环境变量——dsh-credentials-local 的 `resolve()` 是 `inherited env wins`，注入 env 会使 dsh 永远读旧值，且 Web UI 改 key 被 `assertUnshadowed` 直接拒绝（源码 `dsh-credentials-local lib/index.js:636`）；② 新增 `DshCredentialsSync`（`WatchService` 监听各项目 DSH_HOME 凭据文件，dsh Web UI/Models page 以 `version:1 + refs.DEEPSEEK_API_KEY` 写入该文件 → 捕获 → 回写 PasswordSafe + 插件全局凭据文件）。**方案B 语义**：改 key 的那个 dsh 进程（去 env 后读文件层，该进程立即生效），其它项目**下次启动/重启**时 `syncCredentials()`/`ensureHome()` 从全局复制+透传 → 全局一致。监听器随项目 Disposable 释放（`DshCredentialsSync.release(projectName)`）。`onFileChanged` 仅当子项目 key 与全局不同才回写（无自激循环）。新增 DshCredentialsSyncTest 6 例 |
+| 2026-09-11 | v0.1.11 | 修复"DSH 一键解释"自动发送永远失败（用户截图报障）：v0.1.10 只把"发送选中代码"的 `injectToBrowser` 切到 Lexical composer 选择器，`sendQuestion` 的 `buildSendQuestionScript` 仍只查 `<textarea>` → dsh web ≥ 0.1.2 下必然 8s 超时回传 `no-composer` → 通知 "Auto-send failed; the log was copied to the clipboard."。现两条注入路径共用同一套选择器 + `readText`（contenteditable 用 `innerText`），回车派发到 composer 本体，写入无效才回传 `no-composer`（避免空草稿回车手势被误判成 submitted）；§3.11/§3.7 与 PROJECT_NOTES §3.4/§3.5 同步更新 |

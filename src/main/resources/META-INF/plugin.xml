@@ -82,6 +82,46 @@
 
     <change-notes><![CDATA[
         <h3>English / 中文</h3>
+        <h4>v0.1.11</h4>
+        <ul>
+            <li>Compatibility baseline is now IntelliJ IDEA <strong>2025.1–2026.2</strong>
+            (<code>since-build 251</code>, <code>until-build 262.*</code>).</li>
+            <li>兼容范围现为 IntelliJ IDEA <strong>2025.1–2026.2</strong>
+            （<code>since-build 251</code>、<code>until-build 262.*</code>）。</li>
+            <li>Bump bundled DeepSeek Harness runtime to <strong>0.1.5-rc.2</strong>
+            (<code>@earendil-works/pi-ai</code> 0.85.1, <code>@anthropic-ai/sdk</code> 0.123.0).
+            Adds <code>dsh-tool-present</code>, <code>dsh-http-proxy</code>,
+            <code>dsh-sandbox-windows-acl</code>; CI now locks Node 24 LTS via
+            <code>actions/setup-node</code> <code>node-version: '24'</code> (Node 20 is unsupported on
+            GitHub-hosted runners).</li>
+            <li>Build scripts (<code>prepare-dsh-cache.mjs</code> / <code>build-dsh.mjs</code>)
+            now pass <code>--include=dev</code> to <code>npm install</code>: dsh places
+            <code>dsh-llm-pi-ai</code> in devDependencies, so omitting dev would silently strip the
+            <code>@anthropic-ai/sdk</code> provider chain and break Anthropic providers at runtime.
+            Stage 3 of <code>build-dsh.mjs</code> now also asserts
+            <code>node_modules/@anthropic-ai/sdk</code> is present (fail-fast guard).</li>
+            <li>升级内置 DeepSeek Harness 运行时到 <strong>0.1.5-rc.2</strong>
+            （<code>@earendil-works/pi-ai</code> 0.85.1、<code>@anthropic-ai/sdk</code> 0.123.0）。
+            新增 <code>dsh-tool-present</code>、<code>dsh-http-proxy</code>、
+            <code>dsh-sandbox-windows-acl</code>；CI 通过 <code>actions/setup-node</code> 锁 Node 24 LTS
+            （Node 20 在 GitHub Actions runner 上已 unsupported）。</li>
+            <li>构建脚本（<code>prepare-dsh-cache.mjs</code> / <code>build-dsh.mjs</code>）现在
+            <code>npm install</code> 显式带 <code>--include=dev</code>：dsh 把
+            <code>dsh-llm-pi-ai</code> 放在 devDependencies，省了 dev 会静默丢掉
+            <code>@anthropic-ai/sdk</code> provider 链路导致 anthropic provider 加载即报错。
+            <code>build-dsh.mjs</code> Stage 3 增加 <code>@anthropic-ai/sdk</code> 必在校验（fail-fast 兜底）。</li>
+            <li>Fix "DSH 一键解释" (Run console → explain the selected log) never auto-submitting on
+            dsh web ≥ 0.1.2: its JCEF script still looked for a <code>&lt;textarea&gt;</code> composer,
+            timed out after 8s and fell back to the clipboard ("Auto-send failed"). It now shares the
+            <code>[data-composer-input]</code> / <code>contenteditable</code> selector chain with
+            "Send Selection to DSH", dispatches Enter to the composer root, and reports
+            <code>no-composer</code> only when the text really did not land.</li>
+            <li>修复"DSH 一键解释"（运行控制台选中日志 → 解释）在 dsh web ≥ 0.1.2 下永远自动发送失败：
+            其 JCEF 脚本仍在查找 <code>&lt;textarea&gt;</code> composer，8s 超时后降级剪贴板
+            （提示 "Auto-send failed; the log was copied to the clipboard."）。现与"发送选中代码到 DSH"
+            共用同一套 <code>[data-composer-input]</code> / <code>contenteditable</code> 选择器，
+            回车派发到 composer 本体，仅当文本确实没写进去时才回传 <code>no-composer</code>。</li>
+        </ul>
         <h4>v0.1.10</h4>
         <ul>
             <li>Fix "Send Selection to DSH" not filling the composer on dsh web ≥ 0.1.2 (Lexical rich
@@ -146,12 +186,12 @@
 
     <!-- 2026.2 起 JCEF 从平台核心拆分为内置插件 com.intellij.modules.jcef（"Web Browser (JCEF)"），
          使用 JCEF（JBCefBrowser）的插件须显式声明依赖，否则运行时 NoClassDefFoundError。
-         该别名自 2025.3.1 (build 253) 引入；为兼容 2024.1–2025.3（JCEF 在平台核心、无此插件 id），
-         用 optional 依赖：253+ 建立依赖使 JCEF 类可见，241–252 缺失时忽略（走核心 JCEF）。
+         该别名自 2025.3.1 (build 253) 引入；为兼容 2025.1–2025.3（JCEF 在平台核心、无此插件 id），
+         用 optional 依赖：253+ 建立依赖使 JCEF 类可见，251–252 缺失时忽略（走核心 JCEF）。
          见 docs/PROJECT_NOTES.md "2026.2 JCEF 拆分"。 -->
     <depends optional="true">com.intellij.modules.jcef</depends>
 
-    <idea-version since-build="241" until-build="262.*"/>
+    <idea-version since-build="251" until-build="262.*"/>
 
     <actions>
         <!-- Step 4：编辑器右键发送选中代码到 DSH（图标与插件工具窗口一致，便于识别归属） -->

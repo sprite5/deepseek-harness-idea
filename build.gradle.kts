@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.deepseek.harness"
-version = "0.1.10"
+version = "0.1.11"
 
 // v0.1.7 起 universal plugin zip（无平台后缀，跨所有 OS/arch）。
 // gradle-intellij-plugin 默认产物名 = <plugin-name>-<version>.zip，无法直接通过
@@ -24,7 +24,7 @@ val dshVersion: String = when {
     project.hasProperty("dshVersion") -> project.property("dshVersion").toString()
     else -> rootProject.file("scripts/build-dsh.mjs").takeIf { it.isFile }?.readText()?.let { text ->
         Regex("""opt\('dsh-version',\s*'([^']+)'\)""").find(text)?.groupValues?.get(1)
-    } ?: "0.1.2-rc.1"
+    } ?: "0.1.5-rc.2"
 }
 
 val hostOs: String = when {
@@ -76,7 +76,7 @@ intellij {
 
 tasks {
     patchPluginXml {
-        sinceBuild.set("241")
+        sinceBuild.set("251")
         untilBuild.set("262.*")
         dependsOn("bundleDsh")
         doLast {

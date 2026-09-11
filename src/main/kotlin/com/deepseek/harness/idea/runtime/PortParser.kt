@@ -7,7 +7,8 @@ import java.nio.file.Path
  * 解析 dsh web 启动日志中的 URL 行。
  *
  * dsh 0.1.1-rc.2: `dsh web: http://127.0.0.1:<port>`（无 auth）
- * dsh 0.1.2-rc.1+: `dsh web: http://127.0.0.1:<port>/?token=<launchToken>`（BrowserAuth）
+ * dsh 0.1.2-rc.1+（当前 0.1.5-rc.2，实测保留同样形态）:
+ * `dsh web: http://127.0.0.1:<port>/?token=<launchToken>`（BrowserAuth）
  *
  * 启动 token 是 dsh 0.1.2+ 强制要求的认证输入，没有 token 时
  * `/` 会被 dsh 拦截返回 401；插件也拿不到合法 cookie。

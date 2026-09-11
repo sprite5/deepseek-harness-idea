@@ -4,17 +4,17 @@
 // 产物：build/dsh/dsh/node_modules/ + build/dsh-universal.zip（约 70 MB，跨所有 OS/arch）
 //
 // 用法：
-//   node scripts/build-dsh.mjs [--dsh-version 0.1.1-rc.2] [--hanui-version 0.2.5]
+//   node scripts/build-dsh.mjs [--dsh-version 0.1.5-rc.2] [--hanui-version 0.2.5]
 //        [--output build/dsh] [--registry <npm>] [--cache <dir>]
 //        [--bundle] [--force]
 //
 // 设计：幂等的 4 阶段构建，每次跑都检查当前状态、缺啥补啥；任意阶段失败都不致命，
 // 下一阶段仍可继续。npm install 全图解析在本机/CI 都可能卡死，所以分两步：
 //   Stage 1: dsh 基础树（~190 JS 包）—— 复用 IDEA runtime tree / 全局 npm tree / build/runtime 残留 / npm install 兜底
-//   Stage 2: 15 个 native prebuild（sharp/koffi/node-addon-require-builtin 各 6 变体）—— 逐包 `npm pack` + `tar -xzf`，独立 install，绝不触发 npm 全图解析
+//   Stage 2: 18 个 native prebuild（sharp/koffi/node-addon-require-builtin 各 6 变体）—— 逐包 `npm pack` + `tar -xzf`，独立 install，绝不触发 npm 全图解析
 //   Stage 3: 验证（文件存在 + 树结构；不 require native，因跨平台会抛错）
-//   Stage 4: 打 zip（已存在且无 --force 则跳过）。用 `zip` CLI 而非 `tar -a`，
-//     因为 GNU tar 的 --auto-compress 不识别 .zip 后缀，会输出裸 tar 改名成 .zip。
+//   Stage 4: 请求 --bundle 时总是从当前树重建 zip，避免升级 dsh 后误复用旧版本 bundle。
+//     使用纯 JS ZIP writer，而不是依赖不同平台行为不一致的 tar/zip CLI；
 //     详见 stage4Bundle() 内的注释。
 //
 // 全部 npm pack 都带 --pack-destination（写到指定目录），避免 stdout 截断 tarball。
@@ -43,7 +43,7 @@ function opt(name, def) {
 }
 function flag(name) { return args.includes('--' + name); }
 
-const dshVersion = opt('dsh-version', '0.1.2-rc.1');
+const dshVersion = opt('dsh-version', '0.1.5-rc.2');
 const hanuiVersion = opt('hanui-version', '0.2.5');
 const output = opt('output', path.join(root, 'build', 'dsh'));
 const registry = opt('registry', process.env.npm_config_registry || 'https://registry.npmmirror.com/');
@@ -110,7 +110,15 @@ function stage1BaseTree() {
 
   for (const c of candidates) {
     if (!fs.existsSync(c)) continue;
-    const pkg = JSON.parse(fs.readFileSync(path.join(c, 'package.json'), 'utf8'));
+    let pkg;
+    try {
+      pkg = JSON.parse(fs.readFileSync(path.join(c, 'package.json'), 'utf8'));
+    } catch (e) {
+      // 候选源残缺（典型：全局 npm 的 dsh 被 partial uninstall，package.json 没了但
+      // native file 还在被某进程占用，导致目录"半残"）；跳过这个候选避免误复用。
+      warn(`   跳过残缺候选: ${c} (${e.code || e.message})`);
+      continue;
+    }
     if (pkg.version !== dshVersion) continue;
     // c = .../node_modules/@deepseek-ai/dsh；源 node_modules = path.resolve(c, '..', '..')
     const srcTree = path.resolve(c, '..', '..');
@@ -118,7 +126,7 @@ function stage1BaseTree() {
     rm(dshDir);
     fs.mkdirSync(dshDir, { recursive: true });
     // node_modules 内容 → dshDir/node_modules/
-    copyTree(srcTree, path.join(dshDir, 'node_modules'), ['@anthropic-ai']);
+    copyTree(srcTree, path.join(dshDir, 'node_modules'));
     // 顶层 package.json 也拷过来（stage 1 verify 不严格需要，但保持完整性）
     const srcPkg = path.join(path.dirname(srcTree), 'package.json');
     if (fs.existsSync(srcPkg)) fs.copyFileSync(srcPkg, path.join(dshDir, 'package.json'));
@@ -140,7 +148,7 @@ function stage1BaseTree() {
   };
   fs.writeFileSync(path.join(dshDir, 'package.json'), JSON.stringify(pkg, null, 2));
   const r = npmRun(['install', '--ignore-scripts', '--no-audit', '--no-fund', '--include=optional',
-   '--cache', cacheDir, '--registry', registry], dshDir);
+   '--include=dev', '--cache', cacheDir, '--registry', registry], dshDir);
   if (!r.ok) throw new Error(`npm install 兜底失败 (exit ${r.exit})`);
   return true;
 }
@@ -150,7 +158,7 @@ function stage1BaseTree() {
 // npm pack 只下载该包的 tarball，不解析依赖图；tar -xzf 直接展开到 node_modules。
 // --force 允许跨平台装（默认 npm 会 notsup 拒）。
 function stage2NativePrebuilds() {
-  log('Stage 2: native prebuild 补齐（15 个包，每个独立装）');
+  log('Stage 2: native prebuild 补齐（18 个包，每个独立装）');
 
   const packages = [
     // sharp @img
@@ -222,7 +230,7 @@ function stage2NativePrebuilds() {
   }
 
   log(`Stage 2 完成: ${installed} 装上, ${skipped} 已存在, ${failed} 失败`);
-  if (failed > 0) warn(`${failed} 个 native prebuild 装失败，universal zip 可能缺该平台二进制`);
+  if (failed > 0) throw new Error(`${failed} 个 native prebuild 装失败，拒绝生成不完整 universal zip`);
 }
 
 // ─── HanUI compatibility ────────────────────────────────────────────────
@@ -256,26 +264,58 @@ function stage3Verify() {
   if (hanuiPkgJson.version !== hanuiVersion) throw new Error(`hanui 版本不符: ${hanuiPkgJson.version} != ${hanuiVersion}`);
   ok(`dsh ${dshPkg.version}, hanui ${hanuiPkgJson.version}`);
 
-  // native prebuild 变体数
+  // native prebuild 变体必须覆盖所有目标平台；不能只数数量，否则 6 个重复/错误平台也会误过。
+  function requireVariants(label, actual, expected) {
+    const missing = expected.filter((name) => !actual.includes(name));
+    log(`   ${label}: ${actual.join(', ') || '(none)'}`);
+    if (missing.length) throw new Error(`${label} 缺少 universal 变体: ${missing.join(', ')}`);
+  }
+
   const imgDir = path.join(dshDir, 'node_modules/@img');
   const sharpVars = fs.existsSync(imgDir) ? fs.readdirSync(imgDir).filter((n) => n.startsWith('sharp-')).sort() : [];
-  log(`   sharp: ${sharpVars.join(', ') || '(none)'}`);
-  if (sharpVars.length < 6) warn(`sharp 变体 <6 (${sharpVars.length})，部分平台 image 可能挂`);
+  requireVariants('sharp', sharpVars, [
+    'sharp-win32-x64', 'sharp-win32-arm64', 'sharp-darwin-x64',
+    'sharp-darwin-arm64', 'sharp-linux-x64', 'sharp-linux-arm64',
+  ]);
 
   const koromixDir = path.join(dshDir, 'node_modules/@koromix');
   const koffiVars = fs.existsSync(koromixDir) ? fs.readdirSync(koromixDir).filter((n) => n.startsWith('koffi-')).sort() : [];
-  log(`   koffi: ${koffiVars.join(', ') || '(none)'}`);
-  if (koffiVars.length < 6) warn(`koffi 变体 <6 (${koffiVars.length})`);
+  requireVariants('koffi', koffiVars, [
+    'koffi-win32-x64', 'koffi-win32-arm64', 'koffi-darwin-x64',
+    'koffi-darwin-arm64', 'koffi-linux-x64', 'koffi-linux-arm64',
+  ]);
 
   const ptyDir = path.join(dshDir, 'node_modules/node-pty/prebuilds');
   const ptyVars = fs.existsSync(ptyDir) ? fs.readdirSync(ptyDir).sort() : [];
-  log(`   node-pty: ${ptyVars.join(', ') || '(none)'}`);
-  if (ptyVars.length < 6) warn(`node-pty prebuilds <6 (${ptyVars.length})`);
+  requireVariants('node-pty', ptyVars, [
+    'win32-x64', 'win32-arm64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64',
+  ]);
 
   const nrbVars = fs.readdirSync(path.join(dshDir, 'node_modules'))
    .filter((n) => n.startsWith('node-addon-require-builtin-')).sort();
-  log(`   node-addon-require-builtin: ${nrbVars.join(', ') || '(none)'}`);
-  if (nrbVars.length < 6) warn(`nrb 变体 <6 (${nrbVars.length})`);
+  requireVariants('node-addon-require-builtin', nrbVars, [
+    'node-addon-require-builtin-win32-x64-msvc',
+    'node-addon-require-builtin-win32-arm64-msvc',
+    'node-addon-require-builtin-darwin-x64',
+    'node-addon-require-builtin-darwin-arm64',
+    'node-addon-require-builtin-linux-x64-gnu',
+    'node-addon-require-builtin-linux-arm64-gnu',
+  ]);
+
+  // pi-ai 的 anthropic provider 需要的 SDK（@earendil-works/pi-ai 的硬依赖）
+  // — 之前 build 脚本在这里手写 exclude 把这个目录过滤掉了，导致 anthropic provider
+  //   一加载就 ERR_MODULE_NOT_FOUND。保留强制校验，保证下次回归立刻 fail-fast。
+  const piAi = path.join(dshDir, 'node_modules', '@earendil-works', 'pi-ai', 'package.json');
+  if (!fs.existsSync(piAi)) {
+    throw new Error(`缺失: @earendil-works/pi-ai (${piAi}) — dsh-llm-pi-ai 必需`);
+  }
+  const anthropicSdk = path.join(dshDir, 'node_modules', '@anthropic-ai', 'sdk', 'package.json');
+  if (!fs.existsSync(anthropicSdk)) {
+    throw new Error(`缺失: @anthropic-ai/sdk (${anthropicSdk}) — pi-ai 的 anthropic provider 必需`);
+  }
+  const piAiVer = JSON.parse(fs.readFileSync(piAi, 'utf8')).version;
+  const anthropicVer = JSON.parse(fs.readFileSync(anthropicSdk, 'utf8')).version;
+  ok(`@earendil-works/pi-ai ${piAiVer}, @anthropic-ai/sdk ${anthropicVer}`);
 }
 
 // ─── Stage 4: 打 zip（纯 JS，跨平台一致、零 CLI 依赖）──────────────────
@@ -297,17 +337,15 @@ function stage4Bundle() {
   log('Stage 4: 打 zip（纯 JS）');
   if (!bundle) return;
 
-  if (!force && fs.existsSync(bundleZip)) {
-    ok(`已存在 ${path.basename(bundleZip)} (${Math.round(fs.statSync(bundleZip).size / 1048576 * 10) / 10} MB)，跳过`);
-    return;
-  }
+  // 始终从当前 dsh 树重建：bundleZip 位于 output 之外，单靠文件存在无法判断其
+  // 内容版本。升级 dsh 后复用旧 zip 会造成 plugin.xml/目录名标 RC2、实际内容仍是 RC1。
   fs.rmSync(bundleZip, { force: true });
 
   // 把 dshDir 的内容打包为 dsh/ 根（不是 dshDir 本身），与 DshHomeManager 解压逻辑一致
   // dshDir = build/dsh/dsh/；用其父目录 build/dsh/ 让产物带 dsh/ 前缀
   // 注意：dshBin() 期望文件在 runtimeRoot/dsh/node_modules/ 下，所以 zip 必须带 dsh/ 前缀
   const dshContentDir = output;
-  createZip(dshContentDir, bundleZip, { exclude: (name) => name.includes('.npm-cache') || name.includes('@anthropic-ai') });
+  createZip(dshContentDir, bundleZip, { exclude: (name) => name.includes('.npm-cache') });
 
   const sizeMb = Math.round(fs.statSync(bundleZip).size / 1048576 * 10) / 10;
   ok(`${path.basename(bundleZip)} (${sizeMb} MB, ${zipStats.files} files, ${zipStats.deflated} deflate + ${zipStats.stored} store)`);

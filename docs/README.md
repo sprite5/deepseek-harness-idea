@@ -10,7 +10,7 @@
 | [DESIGN.md](./DESIGN.md) | 详设文档：架构、模块设计、接口契约、数据流、测试策略 | 草稿（随实现迭代更新） |
 | [ACCEPTANCE.md](./ACCEPTANCE.md) | PRD §7 验收清单走查（Step 5 执行，自动化 vs 手工项） | 维护中（90/90 自动化；手工项待真实 IDE 会话） |
 | [MILESTONE_REVIEW.md](./MILESTONE_REVIEW.md) | 里程碑评审（Step 6）：Step 0–5 总结、需求覆盖矩阵、遗留问题、风险回顾、后续规划 | ✅ 完成（2026-08-20 评审时点快照，最新状态见上方文档） |
-| [PROJECT_NOTES.md](./PROJECT_NOTES.md) | 项目知识库：本机构建环境、dsh 行为实测、踩坑记录、2024.1 API 勘误、后续任务参考 | 维护中（v0.1.3-dev） |
+| [PROJECT_NOTES.md](./PROJECT_NOTES.md) | 项目知识库：本机构建环境、dsh 行为实测、踩坑记录、历史 API 勘误、后续任务参考 | 维护中（v0.1.3-dev） |
 
 ## 文档约定
 
@@ -38,7 +38,7 @@
 | 2026-08-20 | v0.5.9 | Step 6 里程碑评审：新增 docs/MILESTONE_REVIEW.md（Step 0–5 总结、FR/US/非目标覆盖矩阵、遗留问题 A–D 分级、PRD §9 风险回顾、v0.6/v0.7/v1.x 规划）；同步修正 DESIGN.md（§3.1 intellij 1.17.4、补 v0.5.2–0.5.8 变更记录）与 ACCEPTANCE.md（测试合计 32→36）；测试 36/36 复跑通过 |
 | 2026-08-20 | v1.0.0 开源 | 项目开源发布至 GitHub（MIT）：仓库 tieJiangW/deepseek-harness-idea（main + v0.1.0 tag）；新增根 README.md（中英）、LICENSE、.gitattributes；首次提交 47 文件；Release v0.1.0 含插件 zip 附件（98MB，含内嵌运行时） |
 | 2026-08-20 | v0.1.1 | 兼容修复：`until-build` 251.* → 262.*（用户 IDEA 2026.2/build 262 安装报错，前向编译验证通过）；Gson → 自研 `JsonCodec`（移除平台 Gson 依赖）；新增 JsonCodecTest 9 例；测试 36→45 |
-| 2026-08-21 | v0.1.2 | 2026.2 JCEF 兼容修复：plugin.xml 新增（可选）依赖 `com.intellij.modules.jcef`（2026.2 起 JCEF 拆分内置插件，使用 JBCefBrowser 须声明依赖否则运行时 NoClassDefFoundError；别名自 2025.3.1 引入，optional 保证 241–252 兼容）；JCEF 失败提示附带异常 + 排查建议；PROJECT_NOTES 新增"2026.2 JCEF 拆分" |
+| 2026-08-21 | v0.1.2 | 2026.2 JCEF 兼容修复：plugin.xml 新增（可选）依赖 `com.intellij.modules.jcef`（2026.2 起 JCEF 拆分内置插件，使用 JBCefBrowser 须声明依赖否则运行时 NoClassDefFoundError；别名自 2025.3.1 引入，optional 保证 251–252 兼容）；JCEF 失败提示附带异常 + 排查建议；PROJECT_NOTES 新增"2026.2 JCEF 拆分" |
 | 2026-08-22 | v0.1.3-dev | 运行控制台"DSH 一键解释"（FR-11）：`SendLogExplanationAction` 注册于 `ConsoleView.PopupMenu`（Run 控制台右键组，组 id 2024.1/2026.2 源码核实）；点击后不等待确认，JCEF 自动填 composer + 派发回车提交"解释指令 + 选中日志"；JBCefJSQuery 回传结果（submitted/blocked），失败降级剪贴板；新增 `ExplainLogComposer` 纯函数 + 4 例单测 |
 | 2026-08-22 | v0.1.3-dev | 切换项目工作区修复：`WorkspaceInitializer.ensureWorkspace` 在 create 后追加 workspace.list + workspace.insertBefore 把当前项目挪到显示顺序最前（create 幂等不改变顺序、UI 默认落点=列表第一个，用户实测同窗口切换项目后新会话仍绑旧项目根目录）；新增 WorkspaceInitializerTest 链路 8 例 + WorkspaceInitializerSmokeTest（真实 dsh 切换场景） |
 | 2026-08-22 | v0.1.3-dev | 切换项目工作区根治（用户确认方案）：**每个项目独立 DSH_HOME**（`DshHomeManager.homeDir(projectPath)` = `MD5(projectPath)` 前 16 位目录），dsh 工作区注册表/会话数据按项目隔离——切到任何项目工作区都从当前项目白纸开始，从机制上杜绝"显示其他项目工作区"；`syncCredentials(projectPath)` 项目启动写凭据、设置页 `syncCredentialsAll()` 同步所有打开项目 |
@@ -52,6 +52,8 @@
 | 2026-08-23 | v0.1.3-dev | **设置页 API Key 脱敏回显**（用户要求"前 6 位 + 中间脱敏 + 后 6 位"）：`DshCredentials.maskApiKey(key)` 前 6 位 + `******` + 后 6 位（≤12 位整段脱敏）；`DshSettingsConfigurable` 回显脱敏串（改用 `JBTextField`，否则 `JBPasswordField` 渲染成掩码点看不到），`isModified`/`apply` 以"字段内容 ≠ 脱敏串"判定是否真改了 key，避免把脱敏串写回密码库。新增 DshCredentialsMaskTest 6 例 |
 | 2026-08-23 | v0.1.3-dev | **设置页回显兜底：凭据文件读取**（用户实测"改后仍为空"）：PasswordSafe 读不到 key 时回显为空。`DshCredentials.readApiKeyFromCredentialFile`（行级解析）+ `readApiKeyWithFallback`（先 PasswordSafe，无则回退插件全局凭据文件）；设置页 `readStoredApiKey()` 用它。DshCredentialsMaskTest 增至 10 例 |
 | 2026-08-23 | v0.1.3-dev | **dsh Web UI 改 API key 全局生效**（用户要求+选B）：去掉 `DshProcessManager` 注入的 `DEEPSEEK_API_KEY` 环境变量（dsh-credentials-local `inherited env wins` 遮蔽 Web UI 写入，且 `assertUnshadowed` 拒改）；新增 `DshCredentialsSync`（WatchService 监听各项目凭据文件，dsh Web UI 写 `version:1 + refs.DEEPSEEK_API_KEY` → 捕获 → 回写 PasswordSafe + 插件全局凭据文件）。方案B：当前 dsh 进程立即生效，其它项目下次启动/重启一致。新增 DshCredentialsSyncTest 6 例 |
+| 2026-09-10 | v0.1.10+ | **dsh 运行时升级 0.1.2-rc.1 → 0.1.5-rc.1**（用户要求）：改 `DshHomeManager.DSH_VERSION` + 三个脚本默认值；`@earendil-works/pi-ai` 0.84.4 → 0.85.1、`@anthropic-ai/sdk` 0.91.1 → 0.123.0（端到端 zip 73.8 MB，含新 `dsh-tool-present` / `dsh-http-proxy` / `dsh-sandbox-windows-acl`）；Node 24 LTS 锁版（GitHub Actions runner `setup-node@v4` + `node-version: '24'`，原默认 Node 20 在 runner 上已 unsupported，且 pi-ai engines 要求 `node>=22.19`）；`npm install` 显式加 `--include=dev`（dsh 把 `dsh-llm-pi-ai` 放在 devDeps，省了 anthropic provider 会 ERR_MODULE_NOT_FOUND；`build-dsh.mjs` Stage 3 加 `@anthropic-ai/sdk` 必在校验，fail-fast 兜底）。**真实 dsh 行为未在 IDE 复验**——构建 + 109/109 Kotlin 单测全过，但 dsh web UI / composer / 凭据同步等交互得在 IDE 会话里走一遍（详见 PROJECT_NOTES §3.5） |
+| 2026-09-11 | v0.1.11 | 兼容范围调整为 IntelliJ IDEA 2025.1–2026.2（build 251–262.*）；内置 dsh 升级至 0.1.5-rc.2；修复"运行控制台 → DSH 一键解释"自动发送永远失败（用户截图报障）：v0.1.10 只把"发送选中代码"的 `injectToBrowser` 切到 Lexical composer 选择器，`sendQuestion` 的 `buildSendQuestionScript` 仍只查 `<textarea>`——dsh web ≥ 0.1.2（内置 0.1.5-rc.1）composer 是 `<div contenteditable data-composer-input>`、页面已无 textarea，故必然 8s 超时回传 `no-composer` → 剪贴板兜底 + 通知 "Auto-send failed; the log was copied to the clipboard."。修复：两条注入路径共用同一套选择器（`[data-composer-input]` → `contenteditable` → `textarea`）+ `readText`（contenteditable 读 `innerText`），回车派发到 composer 本体（Lexical ENTER 命令注册在编辑器根节点），写入无效才回传 `no-composer`（避免空草稿回车手势被误判成 submitted）；`compileKotlin` + `buildPlugin` 通过，单测 106/106（4 例真实 dsh 冒烟按环境跳过）；§3.7/§3.11 与 PROJECT_NOTES §3.4/§3.5、ACCEPTANCE 第 9 项同步更新 |
 
 ## 实施进度
 
@@ -66,3 +68,5 @@
 | Step 6 | 里程碑评审（总结 / 遗留问题 / 后续规划） | ✅ 完成 |
 | v0.1.2 | 2026.2 JCEF 兼容修复 | ✅ 完成 |
 | v0.1.3-dev | 切换项目工作区根治（每项目独立 DSH_HOME）+ dsh 0.1.1-rc.2 升级回归 + 运行日志一键解释 + 旧 session/投影缓存升级迁移 + API Key 脱敏回显与 Web UI 全局生效 | ✅ 完成（90/90 测试） |
+| v0.1.10+dsh0.1.5-rc.1 | dsh 运行时升级 0.1.2-rc.1 → 0.1.5-rc.1 + pi-ai 0.84.4 → 0.85.1 + Node 20 → 24 + `--include=dev`（防 anthropic 链路） | ✅ 构建过 + 109/109 Kotlin 单测过；**真实 dsh 行为待 IDE 复验** |
+| v0.1.11+dsh0.1.5-rc.2 | IntelliJ 2025.1–2026.2 兼容声明 + RC2 运行时 + "DSH 一键解释"自动发送修复（`buildSendQuestionScript` 漏改 Lexical composer 选择器） | ✅ `test` / `buildPlugin` 通过；RC2 universal zip 依赖与内嵌 metadata 校验通过；JCEF 注入效果待 IDE 会话复测 |

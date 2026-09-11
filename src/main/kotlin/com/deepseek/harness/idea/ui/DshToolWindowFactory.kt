@@ -603,7 +603,20 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         }
     }
 
-    /** 一键发送注入脚本：填 composer → 派发回车 → 轮询判定结果 → window.<funcName> 回传。 */
+    /**
+     * 一键发送注入脚本：填 composer → 派发回车 → 轮询判定结果 → window.<funcName> 回传。
+     *
+     * composer 选择器与 [injectToBrowser] 保持一致——dsh web ≥ 0.1.2 起 composer 是 Lexical
+     * `contenteditable`（稳定 hook `[data-composer-input]`），页面里**已不存在 `<textarea>`**，
+     * 因此旧版"只查 textarea"的脚本永远命中不了（8s 后回传 `no-composer` → 剪贴板兜底）：
+     *   1) `[data-composer-input]`；2) `div[contenteditable="true"][role="textbox"]`；3) `textarea`（老版本兜底）。
+     * 写入：textarea → 原生 setter + `input` 事件；contenteditable → `execCommand('insertText')`
+     * （走框架 input pipeline；首轮文本无变化时补一次原生选区再试）。
+     * 提交：把非 shift 的 Enter（`keydown`）派发到 composer 本体——dsh `registerComposerKeymap`
+     * 把 Lexical ENTER 命令注册在编辑器根节点上，只有 `shiftKey === true` 才放行换行。
+     * 判定：写入无效 → `no-composer`（调用方剪贴板兜底）；写入成功但回车未送出 →
+     * `blocked`（消息留在输入框）；composer 被清空 → `submitted`。
+     */
     private fun buildSendQuestionScript(text: String, funcName: String?): String {
         val json = escapeJs(text)
         val report = if (funcName != null) {
@@ -616,26 +629,55 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
               const deadline = Date.now() + 8000;
               const text = $json;
               $report
+              const pickComposer = () =>
+                    document.querySelector('[data-composer-input]')
+                    || document.querySelector('div[contenteditable="true"][role="textbox"]')
+                    || document.querySelector('textarea');
+              const readText = (el) => el.tagName === 'TEXTAREA' ? el.value : (el.innerText || el.textContent || '');
+              const writeText = (el, before) => {
+                el.focus();
+                if (el.tagName === 'TEXTAREA') {
+                  // 老版本 dsh 受控 textarea
+                  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+                  setter.call(el, text);
+                  el.dispatchEvent(new Event('input', { bubbles: true }));
+                  const pos = el.value.length;
+                  el.setSelectionRange(pos, pos);
+                  return;
+                }
+                // Lexical / Slate / ProseMirror 等 contenteditable：execCommand 走框架的 input pipeline
+                document.execCommand('insertText', false, text);
+                if (readText(el) !== before) return;
+                // 首轮无效（DOM 选区不在编辑器内）：把光标落到最后一个块级子节点末尾再试一次
+                const sel = document.getSelection();
+                if (!sel) return;
+                const host = el.lastElementChild || el;
+                const r = document.createRange();
+                r.selectNodeContents(host);
+                r.collapse(false);
+                sel.removeAllRanges();
+                sel.addRange(r);
+                document.execCommand('insertText', false, text);
+              };
               const tryInject = () => {
-                const ta = document.querySelector('textarea');
-                if (!ta) { if (Date.now() < deadline) setTimeout(tryInject, 300); else report('no-composer'); return; }
-                const proto = window.HTMLTextAreaElement.prototype;
-                const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-                setter.call(ta, text);
-                ta.dispatchEvent(new Event('input', { bubbles: true }));
+                const el = pickComposer();
+                if (!el) { if (Date.now() < deadline) setTimeout(tryInject, 300); else report('no-composer'); return; }
+                const before = readText(el);
+                writeText(el, before);
+                if (readText(el) === before) { report('no-composer'); return; }
                 setTimeout(() => {
                   // 回车提交（dsh composer：非 shift 的 Enter → keyboard.submit；智能体忙时入队仍送达）
-                  ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+                  el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
                   const t0 = Date.now();
                   const clickSend = () => {
-                    // 仅匹配"发送"按钮（发送/发送消息）；绝不用 class 通配，避免误点运行中的"停止"按钮
-                    const btn = document.querySelector('button[aria-label="Send message"], button[aria-label="发送消息"], button[aria-label="Send"], button[aria-label="发送"]');
+                    // 仅匹配"发送"按钮（发送/发送消息/排队/插话）；绝不用 class 通配，避免误点运行中的"停止"按钮
+                    const btn = document.querySelector('button[aria-label="Send message"], button[aria-label="发送消息"], button[aria-label="Queue message"], button[aria-label="排队发送"], button[aria-label="Steer message"], button[aria-label="插话发送"], button[aria-label="Send"], button[aria-label="发送"]');
                     if (btn && !btn.disabled) { btn.click(); return true; }
                     return false;
                   };
                   const checkCleared = () => {
-                    const cur = document.querySelector('textarea');
-                    return !cur || cur.value.trim() === '';
+                    const cur = pickComposer();
+                    return !cur || readText(cur).trim() === '';
                   };
                   const poll = () => {
                     if (checkCleared()) { report('submitted'); return; }
