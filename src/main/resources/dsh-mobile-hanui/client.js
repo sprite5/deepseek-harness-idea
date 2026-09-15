@@ -798,6 +798,17 @@ window.__ModuleLoader__.load({
     display: block;
   }
 }
+
+/* IDEA tool window: hide redundant session-header blocks (all viewports).
+   headerUtilities = "open workdir in file explorer" split button + "more" menu;
+   headerCorner = right-sidebar toggle (right sidebar is redundant inside IDEA).
+   Match on semantic data-* attrs / class suffixes, not CSS-module hashes. */
+[data-slot="conversation.session.header.utilities"],
+[class*="headerUtilities"],
+[data-conversation-header-corner],
+[class*="headerCorner"] {
+  display: none !important;
+}
 `
 
     function scrubLegacy() {

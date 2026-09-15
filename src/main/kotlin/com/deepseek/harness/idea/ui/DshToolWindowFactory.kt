@@ -258,6 +258,14 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
             "  gap: 4px !important;\n" +
             "  min-height: 18px !important;\n" +
             "  height: auto !important;\n" +
+            "}\n" +
+            "/* 10) 隐藏会话头部两块纯冗余区域：\n" +
+            " *    headerUtilities = 「在文件资源管理器中打开工作目录」split 按钮 + 「更多操作」菜单；\n" +
+            " *    headerCorner = 右侧栏展开按钮（IDEA 里右侧栏已被裁剪，入口无意义）。\n" +
+            " *    用语义化 data-* / class 后缀匹配，不依赖 CSS Modules 哈希前缀。 */\n" +
+            "[class*='headerUtilities'], [data-slot='conversation.session.header.utilities'],\n" +
+            "[class*='headerCorner'], [data-conversation-header-corner] {\n" +
+            "  display: none !important;\n" +
             "}\n"
 
         /** 通过工具窗口主 content（index 0）查找当前项目的面板（SendSelectionAction/SendLogExplanationAction 共用）。 */
