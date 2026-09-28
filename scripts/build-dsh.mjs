@@ -291,6 +291,49 @@ function ensureHanuiCompatibility() {
   ok('hanui explicit index.js entry available');
 }
 
+// ─── Stage 2.5: 裁剪 OPTIONAL_BUNDLES 实验插件 ────────────────────────
+// dsh-app-boot 硬编码的 OPTIONAL_BUNDLES（Voice input / Agent Teams /
+// Auto Authorization Review）在插件页会列出三个 Experimental 入口，IDEA 工具窗
+// 完全用不上。从运行时树物理删除（bundle 本体 + 其专属组件包 + 仅被组件引用的
+// native 依赖），插件页不再出现，产物也瘦身 ~25MB。dsh 主包 package.json 虽声明
+// 这些依赖，但只在用户显式启用 optional bundle 时才 require——列表里都没有就
+// 不会触发。ptc-runtime-python 等其它 experimental 包不在本清单，保留。
+const PRUNED_OPTIONAL_BUNDLES = [
+  // Voice input（bundle + 组件 4 件套）
+  '@deepseek-ai/dsh-experimental-voice-input-bundle',
+  '@deepseek-ai/dsh-experimental-speech-to-text',
+  '@deepseek-ai/dsh-experimental-speech-to-text-sensevoice',
+  '@deepseek-ai/dsh-experimental-api-speech-to-text',
+  '@deepseek-ai/dsh-experimental-client-ui-voice-input',
+  // Agent Teams（profile + 组件 3 件套）
+  '@deepseek-ai/dsh-experimental-agent-team-profile',
+  '@deepseek-ai/dsh-experimental-agent-team',
+  '@deepseek-ai/dsh-experimental-tool-agent-team',
+  '@deepseek-ai/dsh-experimental-client-ui-agent-team',
+  // Auto Authorization Review（单包）
+  '@deepseek-ai/dsh-experimental-auto-review',
+];
+
+function pruneOptionalBundles() {
+  const nm = path.join(dshDir, 'node_modules');
+  let removed = 0;
+  for (const name of PRUNED_OPTIONAL_BUNDLES) {
+    const dir = path.join(nm, name);
+    if (!fs.existsSync(dir)) continue;
+    fs.rmSync(dir, { recursive: true, force: true });
+    removed++;
+  }
+  // sherpa-onnx 全家（node 包 + 各平台 prebuild）：仅被 sensevoice 引用，
+  // voice input 删除后成为孤儿；win-x64 一个变体就 23MB。
+  for (const name of fs.readdirSync(nm)) {
+    if (name.startsWith('sherpa-onnx')) {
+      fs.rmSync(path.join(nm, name), { recursive: true, force: true });
+      removed++;
+    }
+  }
+  ok(`OPTIONAL_BUNDLES 裁剪完成: ${removed} 个包已删除`);
+}
+
 // ─── Stage 3: 验证（仅树检查，不 require native）────────────────────
 function stage3Verify() {
   log('Stage 3: 验证');
@@ -307,6 +350,14 @@ function stage3Verify() {
   if (dshPkg.version !== dshVersion) throw new Error(`dsh 版本不符: ${dshPkg.version} != ${dshVersion}`);
   if (hanuiPkgJson.version !== hanuiVersion) throw new Error(`hanui 版本不符: ${hanuiPkgJson.version} != ${hanuiVersion}`);
   ok(`dsh ${dshPkg.version}, hanui ${hanuiPkgJson.version}`);
+
+  // OPTIONAL_BUNDLES 必须已被裁掉（Stage 2.5）；还在 = 裁剪清单与 dsh 版本脱节
+  for (const name of PRUNED_OPTIONAL_BUNDLES) {
+    if (fs.existsSync(path.join(dshDir, 'node_modules', name))) {
+      throw new Error(`OPTIONAL_BUNDLE 未裁剪: ${name}（Stage 2.5 未生效？）`);
+    }
+  }
+  ok('OPTIONAL_BUNDLES 已裁净');
 
   // native prebuild 变体必须覆盖所有目标平台；不能只数数量，否则 6 个重复/错误平台也会误过。
   function requireVariants(label, actual, expected) {
@@ -570,6 +621,7 @@ async function main() {
   stage1BaseTree();
   ensureMcpBridgeDeps();
   stage2NativePrebuilds();
+  pruneOptionalBundles();
   ensureHanuiCompatibility();
   stage3Verify();
   stage4Bundle();

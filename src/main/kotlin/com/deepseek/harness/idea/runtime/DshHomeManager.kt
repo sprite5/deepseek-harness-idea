@@ -194,6 +194,9 @@ class DshHomeManager : Disposable {
         deployMcpServer(home)
         // 方案 A：把全局唯一配置复制到本子目录（dsh 从子目录读；全局为真源；dsh 内改动下次启动被全局覆盖）
         copyGlobalConfigTo(home)
+        // 方案 A'（0.1.7）：把全局 providers.patch.yaml 的 provider 条目合并进本项目
+        // profiles/web/cordis.patch.yml（跨项目共享第三方 LLM 配置）
+        mergeGlobalProvidersInto(home)
         // 升级迁移：v0.1.2 全局 DSH_HOME 的 session 数据 → 当前项目隔离目录（幂等；workspace 由 dsh 自动重建）
         migrateLegacySessions(home, projectPath)
         return home
@@ -406,168 +409,143 @@ class DshHomeManager : Disposable {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 方案 A：dsh Web UI 改的 llm-pi-ai 节回写到全局 settings.yaml
-    // （参见方案 A 设计；监听器在 DshSettingsSync）
+    // 方案 A'（dsh 0.1.7 适配）：dsh Web UI 改的 llm-pi-ai provider 配置回写全局真源
+    // 0.1.5：配置在 $DSH_HOME/settings.yaml 的 `llm-pi-ai:` 顶层节；
+    // 0.1.7：改为 profiles/web/cordis.patch.yml 里的 cordis 条目
+    //        `- id: llm-pi-ai`（@deepseek-ai/dsh-llm-pi-ai，providers 配置）与
+    //        `- id: agent-default-model`（默认 provider 选择）；
+    //        旧 settings.yaml 被迁移留档为 settings.yaml.imported，不再承载。
+    // 全局真源 = globalConfigHome()/providers.patch.yaml（只存这两个条目的列表）。
+    // 监听器在 DshSettingsSync（监听项目 cordis.patch.yml，变化 → syncProvidersToGlobal）。
     // ─────────────────────────────────────────────────────────────────────────
 
+    /** 0.1.7 provider 配置所在的 cordis 条目 id。 */
+    internal val PROVIDER_ENTRY_IDS = listOf("llm-pi-ai", "agent-default-model")
+
+    /** 全局 provider 真源文件（顶层 YAML 列表，只含 [PROVIDER_ENTRY_IDS] 条目）。 */
+    fun globalProvidersFile(): Path = globalConfigHome().resolve("providers.patch.yaml")
+
+    /** 取一个顶层条目的 `- id:` 值（容忍单/双引号与多余空白）；非 id 条目返回 null。 */
+    private fun entryIdOf(item: String): String? {
+        if (!item.startsWith("- id:")) return null
+        // 先取 token 再去引号：反过来的话，多行条目的尾部引号会粘在 token 后面切不掉
+        val token = item.removePrefix("- id:").trim().takeWhile { !it.isWhitespace() }
+        return token.trim('\'', '"').takeIf { it.isNotEmpty() }
+    }
+
+    /** 把顶层列表文本按列 0 的 `- ` 条目切块（忽略首块之前的注释/空行/`[]` 占位）。 */
+    internal fun splitTopLevelItems(text: String): List<String> {
+        val items = ArrayList<String>()
+        val cur = ArrayList<String>()
+        for (raw in text.split('\n')) {
+            val line = raw.trimEnd('\r')
+            if (line.startsWith("- ") || line == "-") {
+                if (cur.isNotEmpty()) {
+                    items.add(cur.joinToString("\n").trimEnd())
+                    cur.clear()
+                }
+                cur.add(line)
+            } else if (cur.isNotEmpty()) {
+                cur.add(line)
+            }
+        }
+        if (cur.isNotEmpty()) items.add(cur.joinToString("\n").trimEnd())
+        return items.filter { it.isNotBlank() }
+    }
+
+    /** 序列化条目列表为 patch 文件内容（空列表 → `[]`；保留原文头部注释）。 */
+    private fun serializePatchItems(originalText: String, items: List<String>): String {
+        val header = originalText.split('\n')
+            .takeWhile { it.trimStart('\uFEFF').startsWith("#") || it.isBlank() }
+            .joinToString("\n")
+            .trimEnd('\r')
+        val body = if (items.isEmpty()) "[]" else items.joinToString("\n")
+        return (if (header.isBlank()) "" else header + "\n") + body + "\n"
+    }
+
     /**
-     * 把子项目 `settings.yaml` 里的 `llm-pi-ai:` 节回写到全局 settings.yaml 真源。
+     * 在 patch 文本里按条目 id upsert（`entry == null` 表示删除该条目）：
+     * 已有同 id 条目则整体替换，否则追加（删除时不存在则原样返回）。幂等。
+     */
+    internal fun upsertPatchEntry(text: String, id: String, entry: String?): String {
+        val items = splitTopLevelItems(text).toMutableList()
+        val idx = items.indexOfFirst { entryIdOf(it) == id }
+        if (entry == null) {
+            if (idx < 0) return text
+            items.removeAt(idx)
+        } else if (idx >= 0) {
+            if (items[idx] == entry) return text
+            items[idx] = entry
+        } else {
+            items.add(entry)
+        }
+        return serializePatchItems(text, items)
+    }
+
+    /**
+     * 把子项目 `profiles/web/cordis.patch.yml` 里的 provider 条目（`- id: llm-pi-ai` /
+     * `- id: agent-default-model`）回写到全局 providers.patch.yaml 真源。
      *
-     * **语义**：全量替换（不是合并）—— 全局 `llm-pi-ai.providers` 与项目该节内容一致，
-     * 其它顶层节原样保留。最简单也最符合用户预期（用户通常在一个项目里配齐所有
-     * 第三方 provider，然后跨项目共享）。删除语义由 V1「最近一次胜出」承担；
-     * 多项目并集合并留 V2。
-     *
-     * **回写条件**（任一不满足则 noop）：
-     * 1. project 文件存在且可读；
-     * 2. project 文件含 `llm-pi-ai:` 节（即 Web UI 这次改动了 provider）；
-     * 3. 解析后的内容与全局**当前** `llm-pi-ai:` 节文本不同（避免无谓 IO + 自激循环）。
-     *
-     * **不动的东西**：`ui-onboarding`（`prefillAcknowledgeWelcomeNotice` 写入的内测声明）、
-     * cordis 元数据（`$settings` / `$credentials`）、其它顶层节；YAML 内容按行搬运，
-     * 不做 schema 校验——schema 校验由 dsh 自己加载时完成（`settings-rejected` 在 dsh 那边报）。
+     * **语义**：全量镜像（最近一次胜出）—— 全局这两个条目与项目当前内容一致；
+     * 项目里删掉的条目全局同样删掉。内容已一致则不写（防自激循环：
+     * [mergeGlobalProvidersInto] 回写项目文件会触发监听器，走回这里因内容相同而 noop）。
      *
      * @return true 表示全局文件被写入；false 表示 noop 或失败（失败已 LOG.warn）。
      */
-    fun syncProvidersToGlobal(projectSettingsFile: Path): Boolean {
+    fun syncProvidersToGlobal(projectCordisPatchFile: Path): Boolean {
         return try {
-            if (!Files.isReadable(projectSettingsFile)) return false
-            val projectText = Files.readString(projectSettingsFile, StandardCharsets.UTF_8)
-            val projectSection = extractTopLevelSection(projectText, "llm-pi-ai:")
-                ?: return false
-
-            // 确保全局 settings.yaml 存在（与 prefillAcknowledgeWelcomeNotice 风格一致）
-            prefillAcknowledgeWelcomeNotice()
-            val globalFile = globalConfigHome().resolve("settings.yaml")
-            val globalText = if (Files.isReadable(globalFile)) {
-                Files.readString(globalFile, StandardCharsets.UTF_8)
-            } else {
-                ""
+            if (!Files.isReadable(projectCordisPatchFile)) return false
+            val projectText = Files.readString(projectCordisPatchFile, StandardCharsets.UTF_8)
+            val projectItems = splitTopLevelItems(projectText)
+            val entries = PROVIDER_ENTRY_IDS.mapNotNull { id ->
+                projectItems.firstOrNull { entryIdOf(it) == id }
             }
-            val merged = replaceTopLevelSection(globalText, "llm-pi-ai:", projectSection.body)
+            val globalFile = globalProvidersFile()
+            val merged = serializePatchItems("", entries)
             if (Files.exists(globalFile) && Files.readString(globalFile, StandardCharsets.UTF_8) == merged) {
                 false // 已一致 → 无需写
             } else {
+                Files.createDirectories(globalFile.parent)
                 writeUtf8(globalFile, merged)
-                LOG.info("synced llm-pi-ai section from ${projectSettingsFile.fileName} " +
-                    "(providers=${projectSection.body.lineSequence().count { it.trimStart().startsWith("-") || it.contains(':') }} lines)")
+                LOG.info("synced ${entries.size} provider entries from $projectCordisPatchFile to global")
                 true
             }
         } catch (e: Exception) {
-            LOG.warn("failed to sync llm-pi-ai providers from $projectSettingsFile to global", e)
+            LOG.warn("failed to sync provider entries from $projectCordisPatchFile to global", e)
             false
         }
     }
 
     /**
-     * 从 YAML 文本中抽出一个顶层节的（起点行 → 终点行的不含索引, 含头部键名）。
-     * 「顶层」= 行首无前导空白且形如 `<key>:`；节的子内容由下一行缩进识别。
-     * @return 节存在时返回 [Section]；不存在返回 null。
+     * 项目启动（[ensureHome] 调用）：把全局 providers.patch.yaml 的 provider 条目合并进
+     * 项目 `profiles/web/cordis.patch.yml`（按条目 id upsert；幂等），使其它项目在 Web UI
+     * 里配的 provider 在本项目启动即可用。全局真源文件尚不存在时，先以当前项目为种子
+     * （老用户升级后第一个打开的已配置项目成为 donor）。
      */
-    internal data class Section(val startLine: Int, val endLineExclusive: Int, val body: String)
-
-    internal fun extractTopLevelSection(text: String, keyLine: String): Section? {
-        val lines = text.split('\n')
-        // 规范化：keyLine 形如 "llm-pi-ai:"，但文本里 key 前可能带 BOM/CR，统一清洗
-        val targetKey = keyLine.trim().trimStart('\uFEFF').removeSuffix("\r")
-        var startLine = -1
-        for ((i, raw) in lines.withIndex()) {
-            val line = raw.trimEnd('\r')
-            if (isTopLevelKeyLine(line) && line.trim() == targetKey) {
-                startLine = i
-                break
+    fun mergeGlobalProvidersInto(home: Path) {
+        try {
+            val patchFile = home.resolve("profiles/web/cordis.patch.yml")
+            if (!Files.exists(patchFile)) return
+            if (!Files.exists(globalProvidersFile())) {
+                syncProvidersToGlobal(patchFile)
             }
-        }
-        if (startLine < 0) return null
-        // 节的子内容缩进：startLine 之后第一个非空、非顶层 key 行的首字符缩进；
-        // 顶层 key（缩进=0）不能被当节内容，否则会把同文件下一个顶层节吞进来。
-        var childIndent: Int? = null
-        for (j in (startLine + 1) until lines.size) {
-            val l = lines[j].trimEnd('\r')
-            if (l.isBlank()) continue
-            if (isTopLevelKeyLine(l)) break  // 撞到下一个顶层 key → 节为空
-            childIndent = leadingSpaces(l)
-            break
-        }
-        // 节终点：
-        // - childIndent != null：找第一个缩进 < childIndent 的非空行（含下一顶层 key，其缩进=0）
-        // - childIndent == null（节为空）：终点 = 下一个顶层 key 行 或 EOF
-        val endLine = if (childIndent == null) {
-            var e = lines.size
-            for (j in (startLine + 1) until lines.size) {
-                if (isTopLevelKeyLine(lines[j].trimEnd('\r'))) { e = j; break }
+            val globalFile = globalProvidersFile()
+            if (!Files.isReadable(globalFile)) return
+            val globalText = Files.readString(globalFile, StandardCharsets.UTF_8)
+            if (globalText.isBlank() || globalText.trim() == "[]") return
+            val globalItems = splitTopLevelItems(globalText)
+            var projectText = Files.readString(patchFile, StandardCharsets.UTF_8)
+            for (id in PROVIDER_ENTRY_IDS) {
+                val entry = globalItems.firstOrNull { entryIdOf(it) == id } ?: continue
+                projectText = upsertPatchEntry(projectText, id, entry)
             }
-            e
-        } else {
-            var e = lines.size
-            for (j in (startLine + 1) until lines.size) {
-                val l = lines[j].trimEnd('\r')
-                if (l.isBlank()) continue
-                if (leadingSpaces(l) < childIndent) { e = j; break }
+            if (projectText != Files.readString(patchFile, StandardCharsets.UTF_8)) {
+                writeUtf8(patchFile, projectText)
+                LOG.info("merged global provider entries into $patchFile")
             }
-            e
+        } catch (e: Exception) {
+            LOG.warn("failed to merge global provider entries into $home", e)
         }
-        // body: startLine..endLine（不含）的原文；每行 trimEnd('\r') 清掉 CRLF 残留
-        val body = lines.subList(startLine, endLine).joinToString("\n") { it.trimEnd('\r') }
-        return Section(startLine, endLine, body)
-    }
-
-    /**
-     * 在 YAML 文本里把指定顶层节替换为 [newBody]。若 keyLine 不存在则追加到末尾。
-     * - 替换时保留节原起点行之前的缩进风格（与 text 一致；不重排）；
-     * - 节内文本完全由 newBody 决定（含 keyLine 这一行）；
-     * - 节尾与后续内容用一个空行隔开（与 settings.yaml 实际书写风格一致）。
-     */
-    internal fun replaceTopLevelSection(text: String, keyLine: String, newBody: String): String {
-        val lines = text.split('\n').toMutableList()
-        val existing = extractTopLevelSection(text, keyLine)
-        val normalizedNew = newBody.trimEnd('\n')
-        return if (existing == null) {
-            // 追加：空文件 → 直接写；有内容 → 在末尾追加 + 空行 + 节
-            if (lines.isEmpty() || lines.all { it.isBlank() }) {
-                normalizedNew + "\n"
-            } else {
-                val stripped = if (lines.last().isBlank()) lines.dropLast(1) else lines
-                (stripped + listOf("", normalizedNew)).joinToString("\n") + "\n"
-            }
-        } else {
-            // 替换：保留 existing.startLine 之前的内容（不含 startLine 行）+ newBody + 之后的内容
-            val head = lines.subList(0, existing.startLine)
-            val tail = lines.subList(existing.endLineExclusive, lines.size)
-            val headText = if (head.isEmpty()) "" else head.joinToString("\n").trimEnd('\n')
-            val tailText = if (tail.isEmpty()) "" else tail.joinToString("\n")
-            buildString {
-                if (headText.isNotEmpty()) {
-                    append(headText); append('\n')
-                }
-                append(normalizedNew); append('\n')
-                if (tailText.isNotEmpty()) {
-                    append('\n') // 节尾与后续内容之间留一个空行
-                    append(tailText)
-                }
-            }
-        }
-    }
-
-    private fun isTopLevelKeyLine(line: String): Boolean {
-        if (line.isBlank()) return false
-        if (line.first() == ' ' || line.first() == '\t') return false
-        // 形如 `key:` —— 顶层 key 后跟冒号；冒号前允许空格？不，顶层 key 不带前导空白
-        val colon = line.indexOf(':')
-        if (colon <= 0) return false
-        // key 部分只能含字母数字/连字符/下划线/点（dsh 用 `llm-pi-ai` / `ui-onboarding` / `$settings`）
-        val keyPart = line.substring(0, colon)
-        return keyPart.all { it == '$' || it == '_' || it.isLetterOrDigit() || it == '-' || it == '.' }
-    }
-
-    private fun leadingSpaces(line: String): Int {
-        var n = 0
-        for (c in line) {
-            if (c == ' ') n++
-            else if (c == '\t') n += 4 // tab 不常见，宽松按 4 空格计；DSH 写出的都是空格
-            else break
-        }
-        return n
     }
 
     private fun writeIfAbsent(path: Path, content: String) {

@@ -2,23 +2,21 @@ package com.deepseek.harness.idea.runtime
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
- * 纯逻辑测试：DshHomeManager 的 `llm-pi-ai:` 节回写算法。
+ * 纯逻辑测试：DshHomeManager 的 provider 条目（cordis.patch.yml）同步算法
+ * （方案 A'，dsh 0.1.7 适配：llm-pi-ai 配置 = `- id: llm-pi-ai` / `- id: agent-default-model` 条目）。
  *
  * 测试范围（不依赖 PathManager / ApplicationManager）：
- * - [extractTopLevelSection]：抽节 / 找不到 / 空节 / 顶层 vs 嵌套 key
- * - [replaceTopLevelSection]：空文件追加 / 与其它顶层节共存 / 全量替换 / 幂等
+ * - [DshHomeManager.splitTopLevelItems]：顶层条目切块 / 嵌套 `- id:` 不误切 / 空文件 / CRLF
+ * - [DshHomeManager.upsertPatchEntry]：替换 / 追加 / 幂等 / 删除 / 头注释保留 / 引号 id
  *
- * 不测 [syncProvidersToGlobal]（依赖 PathManager.getConfigDir() → 测试环境无 IDE 上下文）；
- * 其端到端行为由工具窗口集成测试覆盖。
+ * [DshHomeManager.syncProvidersToGlobal] / [DshHomeManager.mergeGlobalProvidersInto] 依赖
+ * PathManager.getConfigDir() → 测试环境无 IDE 上下文，端到端行为由工具窗口集成测试覆盖。
  *
- * 函数为 `internal`：测试与主源集同 module，Kotlin `internal` 可见性允许直接调用，
- * 无需反射（反射会被 Kotlin 顶层 internal 函数的 name mangling 干扰）。
+ * 函数为 `internal`：测试与主源集同 module，Kotlin `internal` 可见性允许直接调用。
  */
 class DshSettingsSyncTest {
 
@@ -26,186 +24,118 @@ class DshSettingsSyncTest {
         DshHomeManager::class.java.getDeclaredConstructor().apply { isAccessible = true }
             .newInstance()
 
-    // ───────── extractTopLevelSection ─────────
+    // ───────── splitTopLevelItems ─────────
 
     @Test
-    fun `extract llm-pi-ai section from typical settings yaml`() {
+    fun `split extracts top-level entries from real-world patch`() {
         val text = """
-            ui-onboarding:
-              welcomeNoticeVersion: "2026-08-13.1"
-
-            llm-pi-ai:
-              providers:
-                ark-plan:
-                  apiKeyEnv: ARK_PLAN_API_KEY
-                  displayName: 火山方舟 PLAN
-                  api: openai-completions
-                  baseURL: https://ark.cn-beijing.volces.com/api/v3
-                  models:
-                    - id: doubao-pro-32k
-                      contextWindow: 32000
-
-            other-section:
-              foo: bar
+            # 本层由插件通过 --patch 覆盖，不在此修改
+            - id: dsh-client-ui-settings-general
+              name: "@deepseek-ai/dsh-client-ui-settings-general"
+              config:
+                welcomeNoticeVersion: 2026-08-13.1
+            - id: llm-pi-ai
+              name: "@deepseek-ai/dsh-llm-pi-ai"
+              config:
+                providers:
+                  xiaomi-token-plan-cn:
+                    apiKeyEnv: XIAOMI_TOKEN_PLAN_CN_API_KEY
+                    models:
+                      - id: mimo-v2.6-flash
+                        name: mimo-v2.6-flash
+            - id: agent-default-model
+              name: "@deepseek-ai/dsh-agent-default-model"
+              config:
+                provider: xiaomi-token-plan-cn
         """.trimIndent() + "\n"
 
-        val section = manager.extractTopLevelSection(text, "llm-pi-ai:")
-        assertNotNull(section)
-        val body = section!!.body
-        assertTrue(body.startsWith("llm-pi-ai:"))
-        assertTrue(body.contains("ark-plan:"))
-        assertTrue(body.contains("doubao-pro-32k"))
-        assertFalse(body.contains("other-section"))
-        assertFalse(body.contains("ui-onboarding"))
+        val items = manager.splitTopLevelItems(text)
+        assertEquals(3, items.size)
+        assertTrue(items[1].startsWith("- id: llm-pi-ai"))
+        assertTrue(items[1].contains("mimo-v2.6-flash"), "nested model entries stay inside the item")
+        assertTrue(items[1].contains("apiKeyEnv"))
+        assertTrue(items[2].startsWith("- id: agent-default-model"))
+        // 头注释不属于任何条目
+        assertFalse(items[0].contains("--patch"))
     }
 
     @Test
-    fun `extract returns null when section missing`() {
-        val text = "ui-onboarding:\n  welcomeNoticeVersion: \"v1\"\n"
-        assertNull(manager.extractTopLevelSection(text, "llm-pi-ai:"))
+    fun `split does not treat indented dashes as new entries`() {
+        val text = "- id: llm-pi-ai\n  config:\n    models:\n      - id: a\n      - id: b\n- id: x\n"
+        val items = manager.splitTopLevelItems(text)
+        assertEquals(2, items.size)
+        assertEquals("- id: x", items[1])
     }
 
     @Test
-    fun `extract handles section with no children`() {
-        val text = "llm-pi-ai:\nui-onboarding:\n  welcomeNoticeVersion: \"v1\"\n"
-        val section = manager.extractTopLevelSection(text, "llm-pi-ai:")
-        assertNotNull(section)
-        assertEquals("llm-pi-ai:", section!!.body)
-        assertFalse(section.body.contains("ui-onboarding"))
+    fun `split handles empty list placeholder and blank lines`() {
+        assertEquals(0, manager.splitTopLevelItems("# comment\n[]\n").size)
+        assertEquals(0, manager.splitTopLevelItems("[]\n").size)
+        assertEquals(2, manager.splitTopLevelItems("- id: a\n  k: v\n\n- id: b\n").size)
     }
 
     @Test
-    fun `extract ignores keys that are not at top level`() {
+    fun `split handles CRLF line endings`() {
+        val text = "- id: llm-pi-ai\r\n  name: x\r\n- id: agent-default-model\r\n  k: v\r\n"
+        val items = manager.splitTopLevelItems(text)
+        assertEquals(2, items.size)
+        items.forEach { assertFalse(it.contains('\r')) }
+    }
+
+    // ───────── upsertPatchEntry ─────────
+
+    @Test
+    fun `upsert replaces existing entry and keeps header comment`() {
         val text = """
-            outer:
-              llm-pi-ai:
-                fake: true
-            llm-pi-ai:
-              providers: {}
+            # 本层由插件通过 --patch 覆盖，不在此修改
+            - id: llm-pi-ai
+              config:
+                providers:
+                  old:
+                    apiKeyEnv: OLD_KEY
         """.trimIndent() + "\n"
-        val section = manager.extractTopLevelSection(text, "llm-pi-ai:")
-        assertNotNull(section)
-        assertFalse(section!!.body.contains("fake: true"))
+        val out = manager.upsertPatchEntry(
+            text, "llm-pi-ai",
+            "- id: llm-pi-ai\n  config:\n    providers:\n      new:\n        apiKeyEnv: NEW_KEY",
+        )
+        assertTrue(out.startsWith("# 本层由插件通过 --patch 覆盖，不在此修改\n"), "header comment preserved")
+        assertTrue(out.contains("new:"))
+        assertFalse(out.contains("OLD_KEY"), "replaced entry is gone (全量镜像)")
     }
 
     @Test
-    fun `extract handles section at end of file`() {
-        val text = """
-            ui-onboarding:
-              welcomeNoticeVersion: "v1"
-
-            llm-pi-ai:
-              providers:
-                ark-plan:
-                  apiKeyEnv: K
-        """.trimIndent() + "\n"
-        val section = manager.extractTopLevelSection(text, "llm-pi-ai:")
-        assertNotNull(section)
-        assertTrue(section!!.body.contains("ark-plan:"))
-        assertFalse(section.body.contains("ui-onboarding"))
+    fun `upsert appends missing entry to empty list`() {
+        val out = manager.upsertPatchEntry("[]\n", "llm-pi-ai", "- id: llm-pi-ai\n  config:\n    providers: {}")
+        assertFalse(out.contains("[]"), "placeholder replaced by real list")
+        assertTrue(out.startsWith("- id: llm-pi-ai"))
     }
 
     @Test
-    fun `extract handles CRLF line endings`() {
-        val text = "ui-onboarding:\r\n  welcomeNoticeVersion: \"v1\"\r\n\r\nllm-pi-ai:\r\n  providers: {}\r\n"
-        val section = manager.extractTopLevelSection(text, "llm-pi-ai:")
-        assertNotNull(section)
-        assertFalse(section!!.body.contains('\r'))
-    }
-
-    // ───────── replaceTopLevelSection ─────────
-
-    @Test
-    fun `replace appends to empty file`() {
-        val out = manager.replaceTopLevelSection("", "llm-pi-ai:", "llm-pi-ai:\n  providers: {}\n")
-        assertEquals("llm-pi-ai:\n  providers: {}\n", out)
-    }
-
-    @Test
-    fun `replace appends to file with other top-level sections`() {
-        val text = "ui-onboarding:\n  welcomeNoticeVersion: \"v1\"\n"
-        val out = manager.replaceTopLevelSection(text, "llm-pi-ai:", "llm-pi-ai:\n  providers: {}\n")
-        assertTrue(out.contains("ui-onboarding:"))
-        assertTrue(out.contains("welcomeNoticeVersion: \"v1\""))
-        assertTrue(out.contains("llm-pi-ai:"))
-        assertTrue(out.contains("providers: {}"))
-    }
-
-    @Test
-    fun `replace preserves ui-onboarding and replaces llm-pi-ai section`() {
-        val text = """
-            ui-onboarding:
-              welcomeNoticeVersion: "2026-08-13.1"
-
-            llm-pi-ai:
-              providers:
-                old-provider:
-                  apiKeyEnv: OLD_KEY
-
-            other-section:
-              foo: bar
-        """.trimIndent() + "\n"
-        val newBody = """
-            llm-pi-ai:
-              providers:
-                ark-plan:
-                  apiKeyEnv: ARK_PLAN_API_KEY
-        """.trimIndent()
-        val out = manager.replaceTopLevelSection(text, "llm-pi-ai:", newBody)
-        assertTrue(out.contains("ui-onboarding:"), "ui-onboarding must survive")
-        assertTrue(out.contains("welcomeNoticeVersion: \"2026-08-13.1\""), "version preserved verbatim")
-        assertTrue(out.contains("ark-plan:"), "new provider present")
-        assertFalse(out.contains("old-provider:"), "old provider removed (全量替换)")
-        assertTrue(out.contains("other-section:"), "trailing section preserved")
-    }
-
-    @Test
-    fun `replace with empty body wipes providers`() {
-        // 节被「清空」语义：调用方传 normalizedNew="" 时，本算法把整段替换为空串。
-        // 实际场景中 syncProvidersToGlobal 不会传空 body（只在 project 文件缺节时 noop），
-        // 但该测试保证 replace 自身的鲁棒性。
-        val text = """
-            ui-onboarding:
-              welcomeNoticeVersion: "v1"
-
-            llm-pi-ai:
-              providers:
-                ark-plan:
-                  apiKeyEnv: K
-        """.trimIndent() + "\n"
-        val out = manager.replaceTopLevelSection(text, "llm-pi-ai:", "")
-        assertTrue(out.contains("ui-onboarding:"))
-        assertFalse(out.contains("ark-plan:"))
-        assertFalse(out.contains("apiKeyEnv: K"))
-    }
-
-    @Test
-    fun `replace is idempotent on same content`() {
-        val text = """
-            ui-onboarding:
-              welcomeNoticeVersion: "v1"
-            llm-pi-ai:
-              providers:
-                ark-plan:
-                  apiKeyEnv: K
-        """.trimIndent() + "\n"
-        val newBody = """
-            llm-pi-ai:
-              providers:
-                ark-plan:
-                  apiKeyEnv: K
-        """.trimIndent()
-        val once = manager.replaceTopLevelSection(text, "llm-pi-ai:", newBody)
-        val twice = manager.replaceTopLevelSection(once, "llm-pi-ai:", newBody)
+    fun `upsert is idempotent on same content`() {
+        val entry = "- id: agent-default-model\n  config:\n    provider: xiaomi-token-plan-cn"
+        val text = "- id: llm-pi-ai\n  config: {}\n"
+        val once = manager.upsertPatchEntry(text, "agent-default-model", entry)
+        val twice = manager.upsertPatchEntry(once, "agent-default-model", entry)
         assertEquals(once, twice)
     }
 
     @Test
-    fun `replace on section that is the only content`() {
-        val text = "llm-pi-ai:\n  providers: {}\n"
-        val newBody = "llm-pi-ai:\n  providers:\n    ark-plan: {}\n"
-        val out = manager.replaceTopLevelSection(text, "llm-pi-ai:", newBody)
-        assertFalse(out.contains("providers: {}"))
-        assertTrue(out.contains("ark-plan"))
+    fun `upsert with null entry deletes it`() {
+        val text = "- id: llm-pi-ai\n  config: {}\n- id: agent-default-model\n  k: v\n"
+        val out = manager.upsertPatchEntry(text, "llm-pi-ai", null)
+        assertFalse(out.contains("llm-pi-ai"))
+        assertTrue(out.contains("agent-default-model"), "other entries survive")
+        assertEquals(out, manager.upsertPatchEntry(out, "llm-pi-ai", null), "deleting absent entry is noop")
+    }
+
+    @Test
+    fun `upsert matches quoted id`() {
+        val text = "- id: 'llm-pi-ai'\n  config:\n    providers:\n      old:\n        apiKeyEnv: OLD\n"
+        val out = manager.upsertPatchEntry(
+            text, "llm-pi-ai",
+            "- id: 'llm-pi-ai'\n  config:\n    providers:\n      new:\n        apiKeyEnv: NEW",
+        )
+        assertFalse(out.contains("OLD"), "quoted-id entry replaced")
+        assertTrue(out.contains("NEW"))
     }
 }

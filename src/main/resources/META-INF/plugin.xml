@@ -82,6 +82,31 @@
 
     <change-notes><![CDATA[
         <h3>English / 中文</h3>
+        <h4>v0.1.13.1</h4>
+        <ul>
+            <li>Restore cross-project sharing of third-party LLM providers
+            (Models page): dsh 0.1.7 moved the <code>llm-pi-ai</code> config from
+            <code>settings.yaml</code> into cordis patch entries
+            (<code>- id: llm-pi-ai</code> / <code>- id: agent-default-model</code>),
+            which silently disabled the sync. Changes in one project are now
+            mirrored to a global <code>providers.patch.yaml</code> and merged back
+            into every project on startup.</li>
+            <li>Do not ship the three experimental optional bundles
+            (Voice input, Agent Teams, Auto Authorization Review): they only
+            cluttered the plugin page in the IDE tool window; their components
+            and the SenseVoice sherpa-onnx native deps are pruned from the
+            runtime tree at build time (~25 MB smaller).</li>
+            <li>恢复第三方 LLM provider（Models 页）的跨项目共享：dsh 0.1.7 把
+            <code>llm-pi-ai</code> 配置从 <code>settings.yaml</code> 挪进了 cordis
+            patch 条目（<code>- id: llm-pi-ai</code> /
+            <code>- id: agent-default-model</code>），原同步链静默失效。现改为监听
+            <code>cordis.patch.yml</code>，改动镜像到全局
+            <code>providers.patch.yaml</code>，各项目启动时反向合并。</li>
+            <li>默认不装三个实验性 optional bundle（Voice input、Agent Teams、
+            Auto Authorization Review）：构建期从运行时树裁掉 bundle 及其组件包与
+            SenseVoice 的 sherpa-onnx native 依赖（约省 25MB），IDE 工具窗插件页
+            不再出现这三个入口。</li>
+        </ul>
         <h4>v0.1.13</h4>
         <ul>
             <li>Ship the MCP server-side SDK (<code>@modelcontextprotocol/sdk</code>

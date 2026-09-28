@@ -375,11 +375,12 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
                     project.name, homePath.resolve(".credentials.yaml")
                 )
 
-                // dsh Web Models page 改 llm-pi-ai 节（第三方 LLM provider）监听：dsh 写当前项目
-                // DSH_HOME/settings.yaml 的 llm-pi-ai: 节 → 回写到全局 settings.yaml 真源，
-                // 跨项目共享第三方 provider 配置（方案 A：只做 A，不做 UI）。
+                // dsh Web Models page 改第三方 LLM provider 监听：dsh 0.1.7 起把 llm-pi-ai
+                // 配置写进项目 DSH_HOME/profiles/web/cordis.patch.yml 的 cordis 条目
+                // （- id: llm-pi-ai / - id: agent-default-model）→ 回写全局 providers.patch.yaml
+                // 真源，跨项目共享（方案 A'：项目启动时由 ensureHome 反向合并）。
                 com.deepseek.harness.idea.runtime.DshSettingsSync.register(
-                    project.name, homePath.resolve("settings.yaml")
+                    project.name, homePath.resolve("profiles/web/cordis.patch.yml")
                 )
 
                 // Step 3：MCP 桥接编排（bridge + mcp-ide-server + ide.yml patch）

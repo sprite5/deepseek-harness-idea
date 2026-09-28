@@ -2,7 +2,8 @@
 
 > 本文汇总 DeepSeek Harness IDEA 插件开发过程中的**实测环境事实、踩坑记录、dsh 行为结论**，
 > 供后续任务（Step 6 评审及之后的维护/升级）直接参考，避免重复调查。
-> 最后更新：2026-09-28（v0.1.13+dsh0.1.7-rc.2：运行时升级到 0.1.7-rc.2 试验；
+> 最后更新：2026-09-28（v0.1.13.1+dsh0.1.7-rc.2：provider 同步适配 0.1.7 cordis 条目（llm-pi-ai/agent-default-model → 全局 providers.patch.yaml）；裁剪 OPTIONAL_BUNDLES 三件套（voice-input/agent-team/auto-review + sherpa-onnx）；
+> v0.1.13：运行时升级到 0.1.7-rc.2 试验；
 > 选择器适配 `data-presented-files-row`（0.1.7 移除了 `data-produced-files-row`）、
 > pruner 新增裁剪 `ui-sidebar-terminal`（0.1.7 新增右栏终端 tab）；
 > 运行时树显式带 `@modelcontextprotocol/sdk` 1.30.0（0.1.7 不再自带，mcp-ide-server 硬依赖）；
