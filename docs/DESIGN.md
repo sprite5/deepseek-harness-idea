@@ -71,7 +71,7 @@
    拒绝 Web UI 的 set；见 §3.9 与 PROJECT_NOTES §4）。
 4. **Profile 合成**：`profiles/<name>/cordis.yml` 初始为 `[]`，由 bundle 层（`package.json` 的 `dsh.profile.bundles`）+ `cordis.patch.yml` 用户层 + `--patch` 覆盖层合成。插件以 `--patch <ide.yml>` 注入 mcp-client，不污染用户层。
 5. **MCP 客户端**：`@deepseek-ai/dsh-mcp-client` 支持 `transport: streamable-http`；每实例一个 serverName；模型侧工具名为 `mcp__<serverName>__<rawName>`（serverName 须匹配 `^[A-Za-z0-9_-]{1,32}$`）。其依赖 `@modelcontextprotocol/sdk` 存在于 profile 的 hoisted `node_modules`，可被插件附带的 MCP server 脚本 import（脚本置于 DSH_HOME 下按 node 向上查找规则解析）。
-6. **运行时**：固定 `@deepseek-ai/dsh@0.1.5-rc.2` + Node.js 24.x（Node 24 是 GitHub Actions runner LTS），随插件打包。
+6. **运行时**：固定 `@deepseek-ai/dsh@0.1.7-rc.2` + Node.js 24.x（Node 24 是 GitHub Actions runner LTS），随插件打包。
 
 ## 3. 模块设计
 
@@ -115,7 +115,7 @@
 **构建期**（`scripts/build-runtime.ps1`，Gradle task `buildRuntime` 调用；已实现并实测通过）：
 
 1. 下载 Node.js 22.x win-x64（固定版本，SHA-256 校验）→ `<OutputDir>/node/`。
-2. 以 npm 安装 `@deepseek-ai/dsh@0.1.5-rc.2` 及其依赖到 `<OutputDir>/dsh/`（`--ignore-scripts --include=optional --include=dev`；
+2. 以 npm 安装 `@deepseek-ai/dsh@0.1.7-rc.2` 及其依赖到 `<OutputDir>/dsh/`（`--ignore-scripts --include=optional --include=dev`；
    `pi-ai` / `dsh-llm-pi-ai` 在 dsh 里是 devDeps，必须 `--include=dev` 才会装，否则 anthropic provider 链路会 ERR_MODULE_NOT_FOUND；
    win-x64 原生依赖均以 optionalDependencies 预编译产物提供，无需 postinstall）。
 3. 冒烟验证：读取 `dsh` 版本；`-Bundle` 时打包 `runtime-bundle.zip`（**zip 根直接为 `node/` + `dsh/`**，

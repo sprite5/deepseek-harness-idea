@@ -14,7 +14,7 @@ permissions:
 env:
   JAVA_VERSION: '21'
   NPM_REGISTRY: 'https://registry.npmmirror.com/'
-  DSH_VERSION: '0.1.5-rc.2'
+  DSH_VERSION: '0.1.7-rc.2'
   HANUI_VERSION: '0.2.5'
 
 jobs:
@@ -80,6 +80,9 @@ jobs:
           unzip -Z1 build/dsh-universal.zip | grep -Fx 'dsh/node_modules/@anthropic-ai/sdk/package.json'
           unzip -Z1 build/dsh-universal.zip | grep -Fx 'dsh/node_modules/@earendil-works/pi-ai/package.json'
           unzip -Z1 build/dsh-universal.zip | grep -Fx 'dsh/node_modules/dsh-mobile-hanui/package.json'
+          # 插件 mcp-ide-server.mjs 的硬依赖：dsh 0.1.7 起不再自带，缺失 = IDE 工具桥启动即挂
+          unzip -Z1 build/dsh-universal.zip | grep -Fx 'dsh/node_modules/@modelcontextprotocol/sdk/package.json'
+          unzip -Z1 build/dsh-universal.zip | grep -Fx 'dsh/node_modules/express/package.json'
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew

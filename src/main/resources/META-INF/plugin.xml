@@ -82,6 +82,45 @@
 
     <change-notes><![CDATA[
         <h3>English / 中文</h3>
+        <h4>v0.1.13</h4>
+        <ul>
+            <li>Ship the MCP server-side SDK (<code>@modelcontextprotocol/sdk</code>
+            1.30.0 + express) inside the runtime tree — dsh 0.1.7 dropped it, which
+            would have broken the IDE-tools bridge at startup.</li>
+            <li>Fix "switching projects does not move the new project to front":
+            dsh 0.1.7 no longer returns the workspace order from
+            <code>workspace/create</code> and removed the order-query RPC, and an
+            unanchored <code>insertBefore</code> now appends to the <em>end</em>;
+            the current order is now read from <code>storages/workspace.json</code>
+            so the anchored move keeps working.</li>
+            <li>运行时树内置 MCP server 侧 SDK（<code>@modelcontextprotocol/sdk</code>
+            1.30.0 + express）——dsh 0.1.7 不再自带，否则 IDE 工具桥启动即失败。</li>
+            <li>修复"切换项目后新项目不挪到最前"：dsh 0.1.7 的
+            <code>workspace/create</code> 不再返回顺序、顺序查询 RPC 被移除，且无锚点的
+            <code>insertBefore</code> 语义变为追加到<em>末尾</em>；现从
+            <code>storages/workspace.json</code> 读取当前顺序，带锚点挪动恢复正常。</li>
+        </ul>
+        <h4>v0.1.12</h4>
+        <ul>
+            <li>Bump bundled DeepSeek Harness runtime to <strong>0.1.7-rc.2</strong>:
+            message-sending fixes for long conversations, API-key field autofill fixes,
+            plugin-page robustness fixes; no Desktop-only components are bundled
+            (the runtime is built with <code>--profile web</code>).</li>
+            <li>File click interception and compact chip styles now also match
+            <code>[data-presented-files-row]</code> — dsh 0.1.7 removed
+            <code>data-produced-files-row</code> from deliverable rows.</li>
+            <li>Prune the new right-sidebar terminal tab
+            (<code>ui-sidebar-terminal</code>, new in dsh 0.1.7-rc.2): IDEA ships
+            its own terminal, so the in-tool-window copy stays hidden from the
+            plugin list.</li>
+            <li>升级内置 DeepSeek Harness 运行时到 <strong>0.1.7-rc.2</strong>
+            （长对话发送失败修复、API Key 字段自动填充修复、插件页稳定性修复；
+            运行时以 <code>--profile web</code> 构建，不含任何 Desktop 专属组件）。</li>
+            <li>文件点击拦截与紧凑胶囊样式补充匹配 <code>[data-presented-files-row]</code>
+            —— dsh 0.1.7 移除了产物行的 <code>data-produced-files-row</code> 属性。</li>
+            <li>裁剪 0.1.7 新增的右栏终端 tab（<code>ui-sidebar-terminal</code>）：
+            IDEA 自带终端，工具窗内不再出现该入口。</li>
+        </ul>
         <h4>v0.1.11</h4>
         <ul>
             <li>Compatibility baseline is now IntelliJ IDEA <strong>2025.1–2026.2</strong>

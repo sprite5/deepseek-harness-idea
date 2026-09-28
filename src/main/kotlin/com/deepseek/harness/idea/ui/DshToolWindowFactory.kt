@@ -1091,7 +1091,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
               window.addEventListener('click', (e) => {
                 const target = e.target;
                 if (!target || !target.closest) return;
-                const fileEl = target.closest("[data-produced-files-row='true'] button[title], button[aria-label^='Open '], button[class$='_file'], button[class*='fileMention'], a[class*='fileMention'], [class*='filePill'], [class*='filePath'], [class*='path_'], [class*='fileLink'], [class*='_fileLink'], [class*='fileHeader'], [data-file-path]");
+                const fileEl = target.closest("[data-produced-files-row='true'] button[title], [data-presented-files-row='true'] button[title], button[aria-label^='Open '], button[class$='_file'], button[class*='fileMention'], a[class*='fileMention'], [class*='filePill'], [class*='filePath'], [class*='path_'], [class*='fileLink'], [class*='_fileLink'], [class*='fileHeader'], [data-file-path]");
                 if (fileEl) {
                   const aria = fileEl.getAttribute('aria-label') || '';
                   const pathAttr = fileEl.getAttribute('data-file-path') || fileEl.getAttribute('data-path') || fileEl.getAttribute('title') || aria.replace(/^Open\s+/, '') || fileEl.innerText || fileEl.textContent || '';

@@ -21,7 +21,7 @@ class DshClientPluginPrunerTest {
     @TempDir
     lateinit var tempDir: Path
 
-    /** 按 `@deepseek-ai/dsh-web-app/cordis.patch.yml`（0.1.5-rc.2）的实际排版构造的片段。 */
+    /** 按 `@deepseek-ai/dsh-web-app/cordis.patch.yml`（0.1.7-rc.2）的实际排版构造的片段。 */
     private val fixture = """
         # The dsh-web-app bundle patch: the browser surface over the dsh-base layer.
         - insert:
@@ -37,10 +37,17 @@ class DshClientPluginPrunerTest {
 
 
             # The right Sidebar's document tab: bounded file reads with selectable
-            # Markdown, code, HTML, PDF, and plain-text renderers.
+            # Markdown, code, HTML, PDF, Office, and plain-text renderers.
             - id: ui-sidebar-documentpreview
               name: '@deepseek-ai/dsh-client-ui-sidebar-documentpreview'
 
+            # Web profiles opt in; Desktop retains sandboxed HTTP(S) Browser tabs.
+            - id: ui-sidebar-browser
+              name: '@deepseek-ai/dsh-client-ui-sidebar-browser'
+              disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
+
+            - id: ui-sidebar-terminal
+              name: '@deepseek-ai/dsh-client-ui-sidebar-terminal'
             # The right Sidebar's workspace file tree tab type.
             - id: ui-sidebar-files
               name: '@deepseek-ai/dsh-client-ui-sidebar-files'
@@ -49,7 +56,10 @@ class DshClientPluginPrunerTest {
               name: '@deepseek-ai/dsh-client-ui-settings'
     """.trimIndent()
 
-    /** 期望结果：两个 tab 类型连同各自的注释一起消失，左侧栏/右栏本体/其它行原样保留。 */
+    /**
+     * 期望结果：三个 tab 类型连同各自的注释一起消失；左侧栏/右栏本体/browser 行
+     * （web profile 下本就 disabled，非裁剪对象）/其它行原样保留。
+     */
     private val expected = """
         # The dsh-web-app bundle patch: the browser surface over the dsh-base layer.
         - insert:
@@ -63,12 +73,17 @@ class DshClientPluginPrunerTest {
             - id: ui-sidebar-right
               name: '@deepseek-ai/dsh-client-ui-sidebar-right'
 
+            # Web profiles opt in; Desktop retains sandboxed HTTP(S) Browser tabs.
+            - id: ui-sidebar-browser
+              name: '@deepseek-ai/dsh-client-ui-sidebar-browser'
+              disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
+
             - id: ui-settings
               name: '@deepseek-ai/dsh-client-ui-settings'
     """.trimIndent()
 
     @Test
-    fun `removes the two right-sidebar tab types and their comments`() {
+    fun `removes the three right-sidebar tab types and their comments`() {
         assertEquals(expected, DshClientPluginPruner.prune(fixture))
     }
 
@@ -84,6 +99,9 @@ class DshClientPluginPrunerTest {
         )
         assertFalse(pruned.contains("ui-sidebar-files"))
         assertFalse(pruned.contains("ui-sidebar-documentpreview"))
+        assertFalse(pruned.contains("ui-sidebar-terminal"))
+        // 非裁剪对象：web profile 下本就 disabled 的 browser 行必须原样保留
+        assertTrue(pruned.contains("ui-sidebar-browser"), "browser row must stay")
     }
 
     @Test
@@ -169,6 +187,7 @@ class DshClientPluginPrunerTest {
         val pruned = DshClientPluginPruner.prune(original)
         assertFalse(pruned.contains("- id: ui-sidebar-files\n"), "real patch: row must be removed")
         assertFalse(pruned.contains("- id: ui-sidebar-documentpreview\n"), "real patch: row must be removed")
+        assertFalse(pruned.contains("- id: ui-sidebar-terminal\n"), "real patch: terminal row must be removed (0.1.7+)")
         assertTrue(pruned.contains("- id: ui-sidebar-right\n"), "real patch: sidebarRight provider must survive")
         assertEquals(pruned, DshClientPluginPruner.prune(pruned), "real patch: idempotent")
     }

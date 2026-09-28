@@ -8,8 +8,6 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -113,7 +111,13 @@ class DshBootstrapSmokeTest {
         assertEquals(DshProcessManager.State.RUNNING, manager?.currentState(), "dsh did not reach RUNNING")
         val webUrl = url ?: manager?.webUrl()
         assertTrue(webUrl != null, "web url not discovered")
-        assertEquals(200, httpStatus(webUrl!!), "web ui should answer 200 at $webUrl")
+        // dsh 0.1.2+ BrowserAuth：`?token=` 换 303 + Set-Cookie，裸 GET `/` 是 401。
+        // 生产的健康检查/RPC 都走 DshBrowserAuth 的 cookie；测试复刻同一交换后验 200。
+        // （旧断言直接裸 GET webUrl，Java 默认跟随 303 → 无 cookie 的 `/` → 401，必然失败。）
+        val auth = DshBrowserAuth(webUrl!!.substringBefore("/?token=")).also {
+            assertTrue(it.authenticate(webUrl.substringAfter("?token=")), "token exchange should succeed at $webUrl")
+        }
+        assertEquals(200, auth.open("/").responseCode, "web ui should answer 200 (with auth cookie) at $webUrl")
 
         // FR-04.2：等待 workspace.create 落地（异步），项目应注册为默认工作区
         val wsFile = home.resolve("storages/workspace.json")
@@ -127,18 +131,6 @@ class DshBootstrapSmokeTest {
             Thread.sleep(300)
         }
         assertTrue(wsRegistered, "project should be registered as default workspace in workspace.json")
-    }
-
-    private fun httpStatus(url: String): Int {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 5000
-        conn.readTimeout = 5000
-        conn.requestMethod = "GET"
-        try {
-            return conn.responseCode
-        } finally {
-            conn.disconnect()
-        }
     }
 
     private fun runtimeRoot(): Path? =

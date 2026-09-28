@@ -2,9 +2,12 @@
 
 > 本文汇总 DeepSeek Harness IDEA 插件开发过程中的**实测环境事实、踩坑记录、dsh 行为结论**，
 > 供后续任务（Step 6 评审及之后的维护/升级）直接参考，避免重复调查。
-> 最后更新：2026-09-11（v0.1.11+dsh0.1.5-rc.2：运行时升级到 RC2；
-> IntelliJ 兼容声明调整为 2025.1–2026.2 / build 251–262.*；构建与依赖验证见 §1/§3.5；
-> ⚠️ 真实 dsh web UI / composer / 凭据同步等交互仍需在 RC2 的 IDE 会话中复验）
+> 最后更新：2026-09-28（v0.1.13+dsh0.1.7-rc.2：运行时升级到 0.1.7-rc.2 试验；
+> 选择器适配 `data-presented-files-row`（0.1.7 移除了 `data-produced-files-row`）、
+> pruner 新增裁剪 `ui-sidebar-terminal`（0.1.7 新增右栏终端 tab）；
+> 运行时树显式带 `@modelcontextprotocol/sdk` 1.30.0（0.1.7 不再自带，mcp-ide-server 硬依赖）；
+> WorkspaceInitializer 适配 0.1.7（create 不返回顺序、顺序 RPC 被移除、无锚点 insertBefore=追加末尾 → 读 `workspace.json`）；
+> ⚠️ §3.5 的复验清单需在 0.1.7-rc.2 的 IDE 会话中全部重跑）
 
 ---
 
@@ -19,7 +22,7 @@
 | 运行时开发目录 | `tooling/runtime-dev`（`DSH_IDEA_RUNTIME` 指向它）；`build/runtime` 是构建产物（含 bundle） |
 | 自动化沙箱 | pwsh 沙箱拦截工作区外读写与部分出站网络 → **gradle/npm 命令需完整沙箱权限**（仅自动化环境；用户本机无此限制） |
 | 一键打包 | `scripts/build-plugin.bat`（双击；自动探测 JBR/Gradle 缓存，`--no-daemon`，输出产物路径） |
-| 版本号 | 插件版本 = `build.gradle.kts` 第 13 行 `version`；`DshHomeManager.DSH_VERSION`（= dsh 运行时版本 `0.1.5-rc.2`，决定生产运行时目录名；勿随意改，升级=重建运行时） |
+| 版本号 | 插件版本 = `build.gradle.kts` 第 13 行 `version`；`DshHomeManager.DSH_VERSION`（= dsh 运行时版本 `0.1.7-rc.2`，决定生产运行时目录名；勿随意改，升级=重建运行时） |
 | 前向编译检查 | `tooling\gradle-8.14\bin\gradle.bat compileKotlin --no-daemon -PplatformVersion=2026.2`（下载 ideaIC 2026.2 约 1.5GB 到 Gradle 缓存；新平台自带 Kotlin 模块 metadata 高于 2.0.21，已加 `-Xskip-metadata-version-check`；JCEF 自 2026.2 起拆分为内置插件 `com.intellij.modules.jcef`，检查时需列入 `plugins`） |
 
 ### 常用命令（自动化环境需完整权限）

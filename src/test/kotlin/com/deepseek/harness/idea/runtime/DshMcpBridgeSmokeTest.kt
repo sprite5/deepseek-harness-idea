@@ -182,7 +182,12 @@ class DshMcpBridgeSmokeTest {
 
         val webUrl = waitForDshWeb(dshProc, home)
         assertTrue(webUrl != null, "dsh web should boot with strict mcp patch (failOnStartupError)")
-        assertEquals(200, httpStatus(webUrl!!), "web ui should answer 200")
+        // dsh 0.1.2+ BrowserAuth：裸 GET `/` 是 401，必须先完成 token → cookie 交换
+        // （与 DshBootstrapSmokeTest 同一修法；waitForDshWeb 现在返回带 ?token= 的完整 URL）。
+        val auth = DshBrowserAuth(webUrl!!.substringBefore("/?token=")).also {
+            assertTrue(it.authenticate(webUrl.substringAfter("?token=")), "token exchange should succeed at $webUrl")
+        }
+        assertEquals(200, auth.open("/").responseCode, "web ui should answer 200 (with auth cookie)")
     }
 
     // ---- 辅助 ----
@@ -220,16 +225,16 @@ class DshMcpBridgeSmokeTest {
         throw AssertionError("mcp-ide-server no port line; log:\n$buffer")
     }
 
-    /** 等待 dsh web 端口行（最多 60s），返回 URL 或 null。 */
+    /** 等待 dsh web 端口行（最多 60s），返回带 `?token=` 的完整 URL 或 null。 */
     private fun waitForDshWeb(proc: Process, home: Path): String? {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60)
-        val re = Regex("""dsh web: http://127\.0\.0\.1:(\d+)""")
+        val re = Regex("""dsh web: (http://[^\s]+)""")
         val reader = proc.inputStream.bufferedReader()
         while (System.nanoTime() < deadline) {
             if (!proc.isAlive) return null
             while (reader.ready()) {
                 val line = reader.readLine() ?: return null
-                re.find(line)?.let { return "http://127.0.0.1:${it.groupValues[1]}" }
+                re.find(line)?.let { return it.groupValues[1] }
             }
             Thread.sleep(300)
         }
@@ -285,17 +290,6 @@ class DshMcpBridgeSmokeTest {
                 sb.append(']')
             }
             else -> sb.append('"').append(v).append('"')
-        }
-    }
-
-    private fun httpStatus(url: String): Int {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 5000
-        conn.readTimeout = 5000
-        try {
-            return conn.responseCode
-        } finally {
-            conn.disconnect()
         }
     }
 

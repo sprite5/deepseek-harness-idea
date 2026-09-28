@@ -4,7 +4,7 @@
 // 产物：build/dsh/dsh/node_modules/ + build/dsh-universal.zip（约 70 MB，跨所有 OS/arch）
 //
 // 用法：
-//   node scripts/build-dsh.mjs [--dsh-version 0.1.5-rc.2] [--hanui-version 0.2.5]
+//   node scripts/build-dsh.mjs [--dsh-version 0.1.7-rc.2] [--hanui-version 0.2.5]
 //        [--output build/dsh] [--registry <npm>] [--cache <dir>]
 //        [--bundle] [--force]
 //
@@ -43,7 +43,7 @@ function opt(name, def) {
 }
 function flag(name) { return args.includes('--' + name); }
 
-const dshVersion = opt('dsh-version', '0.1.5-rc.2');
+const dshVersion = opt('dsh-version', '0.1.7-rc.2');
 const hanuiVersion = opt('hanui-version', '0.2.5');
 const output = opt('output', path.join(root, 'build', 'dsh'));
 const registry = opt('registry', process.env.npm_config_registry || 'https://registry.npmmirror.com/');
@@ -56,6 +56,13 @@ const bundle = flag('bundle');
 const dshDir = path.join(output, 'dsh');
 const dshBin = path.join(dshDir, 'node_modules/@deepseek-ai/dsh/lib/bin.js');
 const hanuiPkg = path.join(dshDir, 'node_modules/dsh-mobile-hanui/package.json');
+// 插件 mcp-ide-server.mjs 需要 server 侧 MCP SDK + express。dsh 0.1.7 起自己的依赖
+// 树不再带它们（dsh-mcp-client 迁到 @modelcontextprotocol/client 2.0，纯 client 包），
+// 必须由我们显式装进树，否则 mcp-ide-server 启动即 ERR_MODULE_NOT_FOUND。
+// 1.30.0 = 0.1.5 树里的同款（协议 2025-11-25；client 2.0 支持 pre-2026-07-28 回退）。
+const mcpSdkSpec = '@modelcontextprotocol/sdk@1.30.0';
+const mcpSdkPkg = path.join(dshDir, 'node_modules/@modelcontextprotocol/sdk/package.json');
+const expressPkg = path.join(dshDir, 'node_modules/express/package.json');
 const bundleZip = path.join(root, 'build', 'dsh-universal.zip');
 
 function log(m) { console.log(`==> ${m}`); }
@@ -94,9 +101,17 @@ function dirSize(p) {
 // 都没有则 fallback 到 npm install（可能卡，仅作最后兜底）
 function stage1BaseTree() {
   log('Stage 1: dsh 基础树 (JS 包，不含 native prebuild)');
-  if (!force && fs.existsSync(dshBin) && fs.existsSync(hanuiPkg)) {
+  // 已有树必须先校验 dsh 版本：升级 dsh-version 后旧树不可复用（否则 Stage 3 才报
+  // "dsh 版本不符"），版本不符时落到下面的候选复用/重建流程。
+  const existingPkg = path.join(dshDir, 'node_modules/@deepseek-ai/dsh/package.json');
+  let existingVersion = null;
+  try { existingVersion = JSON.parse(fs.readFileSync(existingPkg, 'utf8')).version; } catch { /* missing */ }
+  if (!force && fs.existsSync(dshBin) && fs.existsSync(hanuiPkg) && existingVersion === dshVersion) {
     ok(`已存在 tree，跳过 (${Math.round(dirSize(dshDir) / 1048576)} MB, ${fs.readdirSync(path.join(dshDir, 'node_modules')).length} top-level 包)`);
     return true;
+  }
+  if (existingVersion && existingVersion !== dshVersion) {
+    warn(`现有 tree 为 dsh ${existingVersion}，目标 ${dshVersion} — 重建基础树`);
   }
 
   // 候选源路径（任一可用即复用，不联网）
@@ -151,6 +166,27 @@ function stage1BaseTree() {
    '--include=dev', '--cache', cacheDir, '--registry', registry], dshDir);
   if (!r.ok) throw new Error(`npm install 兜底失败 (exit ${r.exit})`);
   return true;
+}
+
+// ─── Stage 1.5: MCP bridge 依赖补齐 ───────────────────────────────────
+// 任何来源的基础树（npm install / 复用候选 / CI 缓存）都可能没有 @modelcontextprotocol/sdk
+// （0.1.7 起不再是 dsh 的依赖）。缺失就增量装上——npm 会把 express 及其依赖树一并带进来，
+// 已存在的包不会被重装。
+function ensureMcpBridgeDeps() {
+  if (fs.existsSync(mcpSdkPkg) && fs.existsSync(expressPkg)) {
+    ok(`MCP bridge 依赖已就位 (${mcpSdkSpec} + express)`);
+    return;
+  }
+  warn(`运行时树缺少 MCP bridge 依赖 — 增量安装 ${mcpSdkSpec}`);
+  const r = npmRun(
+    ['install', mcpSdkSpec, '--save', '--ignore-scripts', '--no-audit', '--no-fund', '--registry', registry],
+    dshDir,
+    { NPM_CONFIG_FETCH_TIMEOUT: '120000', NPM_CONFIG_FETCH_RETRIES: '3', NPM_CONFIG_LOGLEVEL: 'warn' },
+  );
+  if (!r.ok || !fs.existsSync(mcpSdkPkg) || !fs.existsSync(expressPkg)) {
+    throw new Error(`MCP bridge 依赖安装失败 (${mcpSdkSpec})`);
+  }
+  ok(`MCP bridge 依赖安装完成`);
 }
 
 // ─── Stage 2: native prebuild 补齐 ────────────────────────────────────
@@ -217,9 +253,17 @@ function stage2NativePrebuilds() {
     if (tgzs.length === 0) { failed++; err(`${pkg}: 未找到 tgz`); continue; }
     const tgz = path.join(cache, tgzs[0]);
 
-    // 解压到 dest
+    // 解压到 dest。
+    // 路径陷阱（Git Bash / GNU tar 1.35 实测）：① `-f D:\...` 的盘符冒号会被 GNU tar
+    // 当成 `host:file` 远程语法（"Cannot connect to D: resolve failed"）→ 只传文件名，
+    // 用 cwd 定位到 cache；② `-C D:\...` 的反斜杠会被转义错乱（"D\:\..." 找不到）→
+    // 改成正斜杠盘符路径。bsdtar（System32\tar.exe）对两种写法同样兼容。
     fs.mkdirSync(dest, { recursive: true });
-    const tar = spawnSync('tar', ['-xzf', tgz, '-C', dest, '--strip-components=1'], { stdio: 'inherit' });
+    const tar = spawnSync(
+      'tar',
+      ['-xzf', path.basename(tgz), '-C', dest.replace(/\\/g, '/'), '--strip-components=1'],
+      { stdio: 'inherit', cwd: cache },
+    );
     fs.unlinkSync(tgz);
     if (tar.status !== 0 || !fs.existsSync(path.join(dest, 'package.json'))) {
       failed++; err(`${pkg}: 解压失败`);
@@ -252,7 +296,7 @@ function stage3Verify() {
   log('Stage 3: 验证');
 
   // 必须存在
-  for (const [label, p] of [['dsh bin', dshBin], ['hanui', hanuiPkg]]) {
+  for (const [label, p] of [['dsh bin', dshBin], ['hanui', hanuiPkg], ['mcp sdk', mcpSdkPkg], ['express', expressPkg]]) {
     if (!fs.existsSync(p)) throw new Error(`缺失: ${label} (${p})`);
     ok(`${label} 存在`);
   }
@@ -524,6 +568,7 @@ async function main() {
   const t0 = Date.now();
 
   stage1BaseTree();
+  ensureMcpBridgeDeps();
   stage2NativePrebuilds();
   ensureHanuiCompatibility();
   stage3Verify();

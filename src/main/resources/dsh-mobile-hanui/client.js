@@ -680,6 +680,7 @@ window.__ModuleLoader__.load({
   html.${HTML_CLASS} [class*="filePill"],
   html.${HTML_CLASS} [class*="pill_"],
   html.${HTML_CLASS} [data-produced-files-row] button,
+  html.${HTML_CLASS} [data-presented-files-row] button,
   html.${HTML_CLASS} button[class*="file_"] {
     font-size: 11.5px !important;
     line-height: 16px !important;

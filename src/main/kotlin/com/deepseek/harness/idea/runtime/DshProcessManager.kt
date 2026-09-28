@@ -222,7 +222,7 @@ class DshProcessManager(
                 listeners.forEach { it.onUrlReady(readyUrl) }
                 // FR-04.2：把项目根注册为默认工作区（幂等；失败仅降级，不阻塞 UI）
                 if (projectPath.isNotBlank()) {
-                    WorkspaceInitializer.ensureWorkspace(readyUrl, projectPath, browserAuth)
+                    WorkspaceInitializer.ensureWorkspace(readyUrl, projectPath, browserAuth, homeDir)
                 }
                 return
             }

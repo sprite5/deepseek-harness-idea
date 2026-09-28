@@ -26,7 +26,7 @@ function opt(name, def) {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : def;
 }
 
-const dshVersion = opt('dsh-version', '0.1.5-rc.2');
+const dshVersion = opt('dsh-version', '0.1.7-rc.2');
 const hanuiVersion = opt('hanui-version', '0.2.5');
 const output = opt('output', path.join(root, 'build', 'dsh'));
 const registry = opt('registry', 'https://registry.npmmirror.com/');
@@ -38,6 +38,12 @@ const dshPkg = path.join(dshDir, 'node_modules/@deepseek-ai/dsh/package.json');
 const hanuiPkg = path.join(dshDir, 'node_modules/dsh-mobile-hanui/package.json');
 const piAiPkg = path.join(dshDir, 'node_modules/@earendil-works/pi-ai/package.json');
 const anthropicPkg = path.join(dshDir, 'node_modules/@anthropic-ai/sdk/package.json');
+
+// 插件 mcp-ide-server.mjs 需要 server 侧 MCP SDK（dsh 0.1.7 起不再自带，见 build-dsh.mjs）。
+// npm install 会把 express 及其依赖树一并解析进来。
+const mcpSdkSpec = '@modelcontextprotocol/sdk@1.30.0';
+const mcpSdkPkg = path.join(dshDir, 'node_modules/@modelcontextprotocol/sdk/package.json');
+const expressPkg = path.join(dshDir, 'node_modules/express/package.json');
 
 function log(m) { console.log(`==> ${m}`); }
 function ok(m) { console.log(`   ✓ ${m}`); }
@@ -66,17 +72,19 @@ const cachedPiAiVersion = readPackageVersion(piAiPkg);
 const cachedAnthropicVersion = readPackageVersion(anthropicPkg);
 if (
   fs.existsSync(dshBin) &&
+  fs.existsSync(mcpSdkPkg) &&
+  fs.existsSync(expressPkg) &&
   cachedDshVersion === dshVersion &&
   cachedHanuiVersion === hanuiVersion &&
   cachedPiAiVersion &&
   cachedAnthropicVersion
 ) {
   log(`dsh 基础树已存在: ${dshDir}`);
-  ok(`跳过 npm install（dsh ${cachedDshVersion}, hanui ${cachedHanuiVersion}, pi-ai ${cachedPiAiVersion}, @anthropic-ai/sdk ${cachedAnthropicVersion}）`);
+  ok(`跳过 npm install（dsh ${cachedDshVersion}, hanui ${cachedHanuiVersion}, pi-ai ${cachedPiAiVersion}, @anthropic-ai/sdk ${cachedAnthropicVersion}, mcp sdk ✓）`);
   process.exit(0);
 }
 if (fs.existsSync(dshDir)) {
-  warn(`缓存树无效，将重建（dsh=${cachedDshVersion || 'missing'}, hanui=${cachedHanuiVersion || 'missing'}, pi-ai=${cachedPiAiVersion || 'missing'}, anthropic=${cachedAnthropicVersion || 'missing'}）`);
+  warn(`缓存树无效，将重建（dsh=${cachedDshVersion || 'missing'}, hanui=${cachedHanuiVersion || 'missing'}, pi-ai=${cachedPiAiVersion || 'missing'}, anthropic=${cachedAnthropicVersion || 'missing'}, mcp=${fs.existsSync(mcpSdkPkg) ? 'ok' : 'missing'}）`);
   fs.rmSync(dshDir, { recursive: true, force: true });
 }
 
@@ -91,6 +99,8 @@ const pkg = {
   dependencies: {
     '@deepseek-ai/dsh': dshVersion,
     'dsh-mobile-hanui': hanuiVersion,
+    // 名字与版本分开写，避免 @scope 名里的 @ 干扰
+    '@modelcontextprotocol/sdk': mcpSdkSpec.split('@').pop(),
   },
 };
 fs.writeFileSync(path.join(dshDir, 'package.json'), JSON.stringify(pkg, null, 2));
@@ -149,4 +159,12 @@ if (!installedAnthropicVersion) {
   console.error(`缺失: ${anthropicPkg}（pi-ai anthropic provider 必需）`);
   process.exit(1);
 }
-ok(`dsh 基础树准备完成（dsh ${installedDshVersion}, hanui ${installedHanuiVersion}, pi-ai ${installedPiAiVersion}, @anthropic-ai/sdk ${installedAnthropicVersion}）`);
+if (!fs.existsSync(mcpSdkPkg)) {
+  console.error(`缺失: ${mcpSdkPkg}（插件 mcp-ide-server 必需）`);
+  process.exit(1);
+}
+if (!fs.existsSync(expressPkg)) {
+  console.error(`缺失: ${expressPkg}（插件 mcp-ide-server 必需）`);
+  process.exit(1);
+}
+ok(`dsh 基础树准备完成（dsh ${installedDshVersion}, hanui ${installedHanuiVersion}, pi-ai ${installedPiAiVersion}, @anthropic-ai/sdk ${installedAnthropicVersion}, mcp sdk ✓）`);

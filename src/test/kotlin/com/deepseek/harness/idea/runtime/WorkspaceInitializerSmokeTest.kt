@@ -71,18 +71,26 @@ class WorkspaceInitializerSmokeTest {
         }
         val webUrl = waitRunning(url)
 
+        // dsh 0.1.2+ BrowserAuth：workspace.create 等 api RPC 也要带 cookie。生产路径由
+        // DshProcessManager 构造 browserAuth 传入；测试复刻同一 token → cookie 交换。
+        val auth = DshBrowserAuth(webUrl.substringBefore("/?token=")).also {
+            assertTrue(it.authenticate(webUrl.substringAfter("?token=")), "token exchange should succeed")
+        }
+
         // 模拟项目 A 打开：注册 A
         val dirA = Files.createDirectory(tempDir.resolve("projA")).toFile().absolutePath
         val dirB = Files.createDirectory(tempDir.resolve("projB")).toFile().absolutePath
-        assertTrue(WorkspaceInitializer.ensureWorkspace(webUrl, dirA), "register workspace A")
+        // 0.1.7 起 workspace 顺序查询 remote 被移除，bringToFront 的当前顺序从
+        // DSH_HOME/storages/workspace.json 读——测试传入与生产一致的 homeDir。
+        assertTrue(WorkspaceInitializer.ensureWorkspace(webUrl, dirA, auth, home.toFile()), "register workspace A")
 
         // 模拟同窗口切换项目 B：注册 B 后 B 应挪到显示顺序最前
-        assertTrue(WorkspaceInitializer.ensureWorkspace(webUrl, dirB), "register workspace B")
+        assertTrue(WorkspaceInitializer.ensureWorkspace(webUrl, dirB, auth, home.toFile()), "register workspace B")
         awaitFirstWorkspace(home, dirB)
         assertEquals(canonical(dirB), firstWorkspacePath(home), "B should be first after switching to B")
 
         // 再切回 A：A 应回到最前（create 幂等 + insertBefore 重新排序）
-        assertTrue(WorkspaceInitializer.ensureWorkspace(webUrl, dirA), "re-register workspace A")
+        assertTrue(WorkspaceInitializer.ensureWorkspace(webUrl, dirA, auth, home.toFile()), "re-register workspace A")
         awaitFirstWorkspace(home, dirA)
         assertEquals(canonical(dirA), firstWorkspacePath(home), "A should be first after switching back to A")
     }

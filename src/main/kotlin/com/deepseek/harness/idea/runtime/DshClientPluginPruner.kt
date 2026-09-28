@@ -12,20 +12,21 @@ import java.nio.file.StandardCopyOption
  * ## 为什么要在 bundle patch 上做手术
  *
  * dsh web 的浏览器插件名册由各 bundle 的 `cordis.patch.yml` 以 `- insert:` 列表声明
- * （这 4 个 sidebar 插件在 `@deepseek-ai/dsh-web-app/cordis.patch.yml`）。而 cordis 的
+ * （sidebar 类插件都在 `@deepseek-ai/dsh-web-app/cordis.patch.yml`）。而 cordis 的
  * patch 语法只能「按 id 覆盖已有条目的字段」或「insert 新条目」，**没有删除条目的操作**
  * （见 `dsh-app-boot/lib/index.js` 的 `applyEntryPatches`）。因此从 `--patch` / profile 层
- * 无论怎么写都只能把它们标成 `disabled: true`——那样插件列表里仍会出现 4 张「已禁用」卡片。
+ * 无论怎么写都只能把它们标成 `disabled: true`——那样插件列表里仍会出现「已禁用」卡片。
  *
- * 「默认不包含」只有一条路：在合成之前把这 4 行从 bundle patch 里删掉。行不存在 → 插件不被
+ * 「默认不包含」只有一条路：在合成之前把这些行从 bundle patch 里删掉。行不存在 → 插件不被
  * 加载 → 设置→插件 列表里也不再出现（列表是 Loader 条目的投影，不是包目录的投影）。
- * 等价于「不安装进包里」；磁盘上那两个包的 client.js 是惰性的，删目录只会引入 npm 树
+ * 等价于「不安装进包里」；磁盘上对应的包是惰性的，删目录只会引入 npm 树
  * 不一致的风险，收益接近零，故不删。
  *
- * ## 裁剪对象（右侧栏的两个 tab 类型）
+ * ## 裁剪对象（右侧栏的三个 tab 类型）
  *
- * IDEA 自带工程文件树与编辑器，工具窗里再挂一份「工作区文件树 + Markdown/代码/PDF 预览」
- * 是纯冗余；而聊天区的文件点击已被插件用 DOM 捕获脚本拦下改为在 IDEA 编辑器中打开
+ * IDEA 自带工程文件树、编辑器与终端，工具窗里再挂一份「工作区文件树 + Markdown/代码/PDF
+ * 预览 + 终端」是纯冗余（终端 tab 是 dsh 0.1.7-rc.2 新增的行）；而聊天区的文件点击已被
+ * 插件用 DOM 捕获脚本拦下改为在 IDEA 编辑器中打开
  * （见 `DshToolWindowFactory.buildInterceptFileClickScript`，选择器覆盖 ui-chat/ui-tool/
  * ui-deliverables/ui-reference 实际使用的 `fileMention` / `filePath` / `_fileLink` 类名）。
  *
@@ -51,6 +52,11 @@ object DshClientPluginPruner {
     internal val PRUNED_ROWS: Map<String, String> = linkedMapOf(
         "ui-sidebar-files" to "@deepseek-ai/dsh-client-ui-sidebar-files",
         "ui-sidebar-documentpreview" to "@deepseek-ai/dsh-client-ui-sidebar-documentpreview",
+        // dsh 0.1.7-rc.2 新增的右栏终端 tab（IDEA 自带终端，纯冗余）。无任何插件
+        // inject 它（它自己 inject 别人：ui-sidebar-right / api-terminal-controller），
+        // 删行安全；`ui-sidebar-browser` 行自带 `disabled: ... !== 'desktop'`，web
+        // profile 下本就禁用，无需裁。
+        "ui-sidebar-terminal" to "@deepseek-ai/dsh-client-ui-sidebar-terminal",
     )
 
     /** `    - id: ui-sidebar-files`（group 1 = 缩进，group 2 = id）。 */

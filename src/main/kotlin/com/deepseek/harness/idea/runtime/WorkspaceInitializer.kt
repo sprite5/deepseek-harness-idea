@@ -2,6 +2,7 @@ package com.deepseek.harness.idea.runtime
 
 import com.deepseek.harness.idea.util.JsonCodec
 import com.intellij.openapi.diagnostic.Logger
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
@@ -24,7 +25,12 @@ import java.util.UUID
  *
  * 实测：
  * - dsh 0.1.0-rc.7 ~ 0.1.1-rc.2：127.0.0.1 loopback 信任围栏放行，无需鉴权头
- * - dsh 0.1.2-rc.1+（当前 0.1.5-rc.2）：BrowserAuth，所有 `api` RPC 也要带 cookie（见 `DshBrowserAuth`）
+ * - dsh 0.1.2-rc.1+（当前 0.1.7-rc.2）：BrowserAuth，所有 `api` RPC 也要带 cookie（见 `DshBrowserAuth`）
+ * - dsh 0.1.5-rc.2：`workspace/create` 返回 `{workspace, workspaceIds}`，顺序随 create 直接拿到
+ * - dsh 0.1.7-rc.2：create 返回值变为 `{created, workspace}`（不再带顺序），且顺序查询
+ *   remote 被移除（`workspace/list` 变成目录浏览器，404）→ 当前顺序从
+ *   `DSH_HOME/storages/workspace.json` 的 `global.workspaceIds` 读取；
+ *   **`insertBefore` 无锚点语义是"追加到末尾"**（实测），必须带 `beforeWorkspaceId` 才能挪到最前
  * - RPC gateway 要求 payload 结构为 `{type: "client-request", rpcId, method, payload: {args: {request: {...}}}}`
  */
 object WorkspaceInitializer {
@@ -35,8 +41,11 @@ object WorkspaceInitializer {
      * 调用 workspace.create + 把当前项目挪到显示顺序最前；成功返回 true。
      * 任一步失败不抛出（日志降级，UI 仍可用；最坏回退到旧行为）。
      * @param auth dsh 0.1.2+ 的 BrowserAuth 实例（已换到 cookie）；旧版本传 null
+     * @param homeDir DSH_HOME（可选）。0.1.7 起 workspace 顺序查询 remote 被移除
+     *   （`workspace/list` 变成了目录浏览器），挪到最前所需的当前顺序改从这里
+     *   `storages/workspace.json` 读取。
      */
-    fun ensureWorkspace(webUrl: String, projectPath: String, auth: DshBrowserAuth? = null): Boolean {
+    fun ensureWorkspace(webUrl: String, projectPath: String, auth: DshBrowserAuth? = null, homeDir: File? = null): Boolean {
         if (projectPath.isBlank()) return false
         return try {
             val base = webUrl.trimEnd('/')
@@ -54,7 +63,7 @@ object WorkspaceInitializer {
                 ?.mapNotNull { it as? String }
                 .orEmpty()
             if (workspaceId != null) {
-                bringToFront(base, workspaceId, workspaceIds, auth)
+                bringToFront(base, workspaceId, workspaceIds, auth, homeDir)
             }
             LOG.info("workspace.ensureWorkspace ok for $projectPath")
             true
@@ -76,18 +85,14 @@ object WorkspaceInitializer {
     // ---- 内部实现 ----
 
     /** workspace.insertBefore：把 [workspaceId] 挪到显示顺序最前。 */
-    private fun bringToFront(base: String, workspaceId: String, currentOrder: List<String>, auth: DshBrowserAuth?) {
-        val order = if (currentOrder.isNotEmpty()) {
-            currentOrder
-        } else {
-            val list = rpc(base, "workspace/list", emptyMap(), auth)
-            if (list.ok) {
-                (list.value["items"] as? List<*>)
-                    ?.mapNotNull { (it as? Map<*, *>)?.get("workspaceId") as? String }
-                    .orEmpty()
-            } else {
-                emptyList()
-            }
+    private fun bringToFront(base: String, workspaceId: String, currentOrder: List<String>, auth: DshBrowserAuth?, homeDir: File?) {
+        // 顺序来源（按 0.1.5 → 0.1.7 演进）：
+        // 1. workspace/create 的返回值（0.1.5 带 workspaceIds；0.1.7 改为 {created, workspace}，不再带）
+        // 2. workspace/list RPC（0.1.5 存在；0.1.7 该 remote 被目录浏览器占用，404）
+        // 3. DSH_HOME/storages/workspace.json（0.1.7，结构实测：global.workspaceIds）
+        val order = when {
+            currentOrder.isNotEmpty() -> currentOrder
+            else -> rpcWorkspaceList(base, auth) ?: readStoredOrder(homeDir).orEmpty()
         }
         val move = computeBringToFront(order, workspaceId)
         val targetPayload = if (move != null) {
@@ -108,6 +113,29 @@ object WorkspaceInitializer {
             LOG.info("workspace $workspaceId moved to front (order=${moved.value["workspaceIds"]})")
         } else {
             LOG.warn("workspace.insertBefore failed: ${moved.errorText}")
+        }
+    }
+
+    /** 0.1.5 的 workspace/list fallback（0.1.7 已无此 remote，失败时返回 null 走存储读取）。 */
+    private fun rpcWorkspaceList(base: String, auth: DshBrowserAuth?): List<String>? {
+        val list = rpc(base, "workspace/list", emptyMap(), auth)
+        if (!list.ok) return null
+        return (list.value["items"] as? List<*>)
+            ?.mapNotNull { (it as? Map<*, *>)?.get("workspaceId") as? String }
+    }
+
+    /** 从 DSH_HOME/storages/workspace.json 读当前显示顺序（0.1.7 实测结构：`global.workspaceIds`）。 */
+    private fun readStoredOrder(homeDir: File?): List<String>? {
+        if (homeDir == null) return null
+        return try {
+            val file = homeDir.resolve("storages").resolve("workspace.json")
+            if (!file.isFile) return null
+            val root = JsonCodec.decodeObject(file.readText())
+            val global = root["global"] as? Map<*, *> ?: return null
+            (global["workspaceIds"] as? List<*>)?.mapNotNull { it as? String }
+        } catch (e: Exception) {
+            LOG.warn("failed to read workspace order from storage", e)
+            null
         }
     }
 
