@@ -79,7 +79,7 @@
 node --version
 ```
 
-要求 **>= v18**。版本不符/没装：[Node.js 官网](https://nodejs.org/zh-cn/download) 下载 LTS（20 / 22）一键安装。
+要求 **>= 22.19**（或 24.x 任意版本；与 dsh 0.2.0+ 的 `engines.node` 对齐）。版本不符/没装:[Node.js 官网](https://nodejs.org/zh-cn/download) 下载 LTS（22 / 24）一键安装。
 
 ### 3. 配 API Key
 

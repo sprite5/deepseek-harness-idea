@@ -344,7 +344,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
             return
         }
         if (!nodeInfo.meetsMinimum()) {
-            showError("系统 Node.js ${nodeInfo.version} 过低，需要 ≥ ${com.deepseek.harness.idea.runtime.SystemNodeLocator.MIN_NODE_MAJOR}。\n请升级 Node.js LTS：https://nodejs.org/，或通过环境变量 ${com.deepseek.harness.idea.runtime.SystemNodeLocator.OVERRIDE_ENV} 指定更高版本。")
+            showError("系统 Node.js ${nodeInfo.version} 过低，需要 ≥ ${com.deepseek.harness.idea.runtime.SystemNodeLocator.MIN_NODE_DISPLAY}（24.x 或 22.19+，与 dsh 0.2.0+ engines 对齐）。\n请升级 Node.js LTS：https://nodejs.org/，或通过环境变量 ${com.deepseek.harness.idea.runtime.SystemNodeLocator.OVERRIDE_ENV} 指定更高版本。")
             return
         }
         val nodeFile = nodeInfo.path.toFile()
@@ -382,6 +382,10 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
                 com.deepseek.harness.idea.runtime.DshSettingsSync.register(
                     project.name, homePath.resolve("profiles/web/cordis.patch.yml")
                 )
+
+                // dsh 批量改工作区文件后 IDEA 项目树/文件状态自动刷新（兜底原生 fsnotifier
+                // 时好时坏的问题）：WatchService 递归监听项目根，防抖后异步 VFS 刷新。
+                com.deepseek.harness.idea.runtime.DshTreeAutoRefresh.register(project, projectRoot)
 
                 // Step 3：MCP 桥接编排（bridge + mcp-ide-server + ide.yml patch）
                 val bridge = DshBridgeManager(
@@ -456,6 +460,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         com.deepseek.harness.idea.runtime.DshRuntimeRegistry.getInstance().release(project.name)
         com.deepseek.harness.idea.runtime.DshCredentialsSync.release(project.name)
         com.deepseek.harness.idea.runtime.DshSettingsSync.release(project.name)
+        com.deepseek.harness.idea.runtime.DshTreeAutoRefresh.release(project.name)
     }
 
     fun restart() {
@@ -840,8 +845,9 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
                             val fn = jsQuery?.getFuncName()
                             if (fn != null) {
                                 executeInPage(buildCaptureApiKeyScript(fn))
-                                executeInPage(buildInterceptFileClickScript(fn, bridgeManager?.bridgeUrl(), bridgeManager?.bridgeToken()))
                             }
+                            // 拦截脚本不依赖 jsQuery（fn 可空，脚本内部自行降级），jsQuery 故障时仍可经 Bridge 打开
+                            executeInPage(buildInterceptFileClickScript(fn, bridgeManager?.bridgeUrl(), bridgeManager?.bridgeToken()))
                         }.onFailure { LOG.warn("onLoadEnd injection failed", it) }
                     }
                 }
@@ -861,10 +867,9 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
         compactRetryTimer = javax.swing.Timer(2000) {
             runCatching {
                 injectCompactWorkspace(b)
-                val fn = jsQuery?.getFuncName()
-                if (fn != null) {
-                    executeInPage(buildInterceptFileClickScript(fn, bridgeManager?.bridgeUrl(), bridgeManager?.bridgeToken()))
-                }
+                // 每次重注入都会刷新 __dshIdeaFileCfg（Bridge 端口/token 变化后自动跟进）；
+                // jsQuery 不可用也注入，脚本内部降级为仅 Bridge fetch 路径。
+                executeInPage(buildInterceptFileClickScript(jsQuery?.getFuncName(), bridgeManager?.bridgeUrl(), bridgeManager?.bridgeToken()))
             }
         }.also { it.isRepeats = true; it.start() }
     }
@@ -1023,27 +1028,43 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
      * 构建拦截 DSH 聊天区/工作区中文件链接与文件胶囊点击的注入脚本。
      * 点击时阻止系统默认打开方式，通过 JBCefJSQuery 回传并在 IDEA 编辑器中打开。
      */
-    private fun buildInterceptFileClickScript(funcName: String, bridgeUrl: String? = null, bridgeToken: String? = null): String {
+    /** funcName 可空：jsQuery 通道不可用时仍注入（仅走 Bridge fetch 路径），见 retry timer。 */
+    private fun buildInterceptFileClickScript(funcName: String?, bridgeUrl: String? = null, bridgeToken: String? = null): String {
         val endpoint = escapeJs("${bridgeUrl ?: ""}/open-file")
         val token = escapeJs(bridgeToken ?: "")
+        val fnName = escapeJs(funcName ?: "")
         return """
             (() => {
+              // 配置每次都刷新：Bridge 端口/token 可能在页面存活期间变化，
+              // 一次性 installed 守卫只保护事件监听器，不再锁死配置（否则 stale token 会静默失败）。
+              window.__dshIdeaFileCfg = { endpoint: $endpoint, token: $token, fnName: $fnName, prefix: '$OPEN_FILE_PREFIX' };
               if (window.__dsh_idea_file_click_installed) return;
               window.__dsh_idea_file_click_installed = true;
+              console.info('[dsh-idea] file-click intercept installed', { bridge: !!(window.__dshIdeaFileCfg.endpoint && window.__dshIdeaFileCfg.token), fnName: window.__dshIdeaFileCfg.fnName });
               const report = (p) => {
                 try {
-                  const endpoint = $endpoint;
-                  const token = $token;
-                  if (endpoint && token) {
-                    fetch(endpoint + '?token=' + encodeURIComponent(token), {
+                  const cfg = window.__dshIdeaFileCfg || {};
+                  const callFn = () => {
+                    const fn = cfg.fnName ? window[cfg.fnName] : null;
+                    if (typeof fn === 'function') {
+                      fn({ request: cfg.prefix + p, onSuccess: () => {}, onFailure: () => {} });
+                      console.info('[dsh-idea-file] open requested via jsQuery', { path: p });
+                    } else {
+                      console.warn('[dsh-idea-file] open failed: bridge unreachable and no jsQuery fn', { path: p, hasEndpoint: !!(cfg.endpoint && cfg.token) });
+                    }
+                  };
+                  if (cfg.endpoint && cfg.token) {
+                    fetch(cfg.endpoint + '?token=' + encodeURIComponent(cfg.token), {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ path: p })
-                    }).catch(() => {});
+                    }).then((r) => {
+                      if (r && r.ok) console.info('[dsh-idea-file] open requested via bridge', { path: p, status: r.status });
+                      else callFn();
+                    }).catch(callFn);
+                  } else {
+                    callFn();
                   }
-                  const value = '$OPEN_FILE_PREFIX' + p;
-                  const fn = window.$funcName;
-                  if (typeof fn === 'function') fn({ request: value, onSuccess: () => {}, onFailure: () => {} });
                 } catch (e) { console.warn('[dsh-idea] file callback failed', e); }
               };
 
@@ -1099,6 +1120,7 @@ class DshToolWindowPanel(private val project: Project) : JPanel(CardLayout()), D
                   const clean = pathAttr.trim().replace(/^@+/, '');
                   if (clean && (clean.includes('.') || clean.includes('/') || clean.includes('\\'))) {
                     // 捕获阶段彻底阻断 DSH 原始 host.openPath，避免继续交给 Windows 文件关联。
+                    window.__dshIdeaFileLastClick = { path: clean, at: new Date().toISOString() };
                     e.preventDefault();
                     e.stopPropagation();
                     e.stopImmediatePropagation();

@@ -2,13 +2,16 @@
 
 > 本文汇总 DeepSeek Harness IDEA 插件开发过程中的**实测环境事实、踩坑记录、dsh 行为结论**，
 > 供后续任务（Step 6 评审及之后的维护/升级）直接参考，避免重复调查。
-> 最后更新：2026-09-28（v0.1.13.1+dsh0.1.7-rc.2：provider 同步适配 0.1.7 cordis 条目（llm-pi-ai/agent-default-model → 全局 providers.patch.yaml）；裁剪 OPTIONAL_BUNDLES 三件套（voice-input/agent-team/auto-review + sherpa-onnx）；
+> 最后更新：2026-10-08（v0.1.14+dsh0.2.0-rc.2：跟随 dsh 升级 0.1.7-rc.2 → 0.2.0-rc.2（pi-ai 0.85.1 → 0.87.1，@anthropic-ai/sdk 跟随 rc.2）；
+> 第三方插件维护者多源交叉确认 0.1.7 → 0.2.0 在 cordis patch / 配置 schema / MCP / workspace RPC / Web UI 选择器上**无破坏性变更**（cordis ~4.0.4、schemastery ^3.18.4 不变），故本插件只改 `DshHomeManager.DSH_VERSION` + 三个脚本 + workflow 的 dshVersion；
+> **Node 门槛同步抬到 22.19+ / 24.x**（`SystemNodeLocator.MIN_NODE_MAJOR=22`/`MIN_NODE_MINOR=19`），对齐 dsh `engines.node = "^22.19.0 || >=24.0.0"`；
+> v0.1.13.1：provider 同步适配 0.1.7 cordis 条目（llm-pi-ai/agent-default-model → 全局 providers.patch.yaml）；裁剪 OPTIONAL_BUNDLES 三件套（voice-input/agent-team/auto-review + sherpa-onnx）；
 > v0.1.13：运行时升级到 0.1.7-rc.2 试验；
 > 选择器适配 `data-presented-files-row`（0.1.7 移除了 `data-produced-files-row`）、
 > pruner 新增裁剪 `ui-sidebar-terminal`（0.1.7 新增右栏终端 tab）；
 > 运行时树显式带 `@modelcontextprotocol/sdk` 1.30.0（0.1.7 不再自带，mcp-ide-server 硬依赖）；
 > WorkspaceInitializer 适配 0.1.7（create 不返回顺序、顺序 RPC 被移除、无锚点 insertBefore=追加末尾 → 读 `workspace.json`）；
-> ⚠️ §3.5 的复验清单需在 0.1.7-rc.2 的 IDE 会话中全部重跑）
+> ⚠️ §3.5 的复验清单需在 0.2.0-rc.2 的 IDE 会话中全部重跑）
 
 ---
 
@@ -133,9 +136,9 @@ src/main/resources/
 
 ---
 
-### 3.5 dsh 0.1.5-rc.2 升级待复验项（2026-09-11）
+### 3.5 dsh 0.2.0-rc.2 升级待复验项（2026-10-08）
 
-`§3` 各小节的具体行为结论是在 dsh **0.1.1-rc.2** 上实测的，升级到 **0.1.5-rc.2** 后已重跑构建与 Kotlin 单测且全部通过，但**仍需在真实 IDE 会话里验证**。需在 0.1.5-rc.2 IDE 上重测的事项：
+`§3` 各小节的具体行为结论是在 dsh **0.1.1-rc.2** / **0.1.5-rc.2** 上实测的，升级到 **0.2.0-rc.2** 后已重跑构建与 Kotlin 单测且全部通过，但**仍需在真实 IDE 会话里验证**。需在 0.2.0-rc.2 IDE 上重测的事项：
 
 | 项 | 原 `0.1.1-rc.2` 结论 | 0.1.5-rc.2 复验要点 |
 |---|---|---|
@@ -144,9 +147,11 @@ src/main/resources/
 | `workspace.insertBefore` RPC | 把当前项目挪到最前 | 0.1.5 是否改 RPC 名或参数（`WorkspaceInitializerTest` 12/12 过，参数层 OK） |
 | `?token=<launchToken>` 启动 URL | PortParser 正则解析 | 0.1.5 是否变 token 形态（`PortParserTest` 4/4 过，正则层 OK） |
 | BrowserAuth cookie 换发 | DshBrowserAuth 一次 token→cookie 交换 | 0.1.5 是否改 cookie HMAC 算法或 authority-bound 校验 |
-| 凭据文件 `$settings`/`$credentials` 共享 | McpPatchGenerator 用 cordis patch 写 `settings-file.path`/`credentials-local.path` 指向全局 | 0.1.5 cordis 是否仍支持 `$id` patch（`McpPatchGeneratorTest` 6/6 过，patch 语法层 OK） |
+| 凭据文件 `$settings`/`$credentials` 共享 | McpPatchGenerator 用 cordis patch 写 `settings-file.path`/`credentials-local.path` 指向全局 | 0.2.0 cordis 是否仍支持 `$id` patch（`McpPatchGeneratorTest` 6/6 过，patch 语法层 OK；第三方插件 confirm 0.1.7 → 0.2.0 cordis/schemastery 不变） |
+| 第三方 LLM provider 配置（pi-ai 0.87.1） | 0.1.7 写到 `profiles/web/cordis.patch.yml` 的 `- id: llm-pi-ai` / `- id: agent-default-model`，方案 A' 跨项目合并到全局 `providers.patch.yaml` | 0.2.0 上游 pi-ai 升级到 0.87.1，部分旧 model ID 被移除；确认 `- id: llm-pi-ai` / `- id: agent-default-model` 这两个 cordis 条目仍存在并被 dsh 0.2.0 写入；若入口被改名则 `DshSettingsSync` / `mergeGlobalProvidersInto` 的 `PROVIDER_ENTRY_IDS` 列表需同步更新 |
+| 第三方 provider 模型目录（pi-ai 0.87.1） | 用户在某个项目选的 model ID 跟随该 profile 持久化 | 上游 0.2.0 已确认部分旧 ID 被移除（已知问题，dsh 官方 changelog）；已保存选择可能需要重新选择（用户层问题，不影响插件 seam，但 `DshSettingsConfigurable` 设置页应能正常显示新目录） |
 
-构建侧已确认：`pi-ai` 0.85.1 仍 export `./api/anthropic-messages`（导出 `stream`/`streamSimple`），anthropic provider 链路无破坏；`@earendil-works/pi-ai` 在 dsh 0.1.5-rc.2 里是 `dsh-llm-pi-ai` 的间接依赖（devDeps），`npm install --include=dev` 才会装，已在 `prepare-dsh-cache.mjs` / `build-dsh.mjs` 显式声明。
+构建侧已确认：`pi-ai` 0.87.1 仍 export `./api/anthropic-messages`（导出 `stream`/`streamSimple`，第三方 dsshub / dsh-kingdee 在 rc.2 同日对齐 0 源码改动可证），anthropic provider 链路无破坏；`@earendil-works/pi-ai` 在 dsh 0.2.0-rc.2 里仍是 `dsh-llm-pi-ai` 的间接依赖（devDeps），`npm install --include=dev` 才会装，已在 `prepare-dsh-cache.mjs` / `build-dsh.mjs` 显式声明；Node 门槛同步抬到 **22.19+ / 24.x**（`SystemNodeLocator.MIN_NODE_MAJOR=22` / `MIN_NODE_MINOR=19`），对齐 dsh `engines.node = "^22.19.0 || >=24.0.0"`——Node 22.18 / 20 / 18 等更早版本不再被插件接受（会在 `meetsMinimum()` 直接返回 false 并报错）。
 
 ---
 
@@ -283,7 +288,8 @@ src/main/resources/
 - 运行期自举：`DshHomeManager.hasRuntime()` 在本地缺失且无 `DSH_IDEA_RUNTIME` 时从插件资源解压
   （幂等；`unzip` 兼容顶层单目录前缀剥离 + zip-slip 防护；实测解压 62s，解压后 dsh web 可启动）。
 - 插件 zip 约 98MB（含 106.9MB 压缩运行时），符合 PRD 体积预期（150-300MB 内）。
-- Node 版本：**v22.23.2**（npmmirror 二进制镜像；SHA256 `1177B413...`）；dsh 固定 `@deepseek-ai/dsh@0.1.1-rc.2`。
+- Node 版本：**v22.23.2**（npmmirror 二进制镜像；SHA256 `1177B413...`）；dsh 固定 `@deepseek-ai/dsh@0.2.0-rc.2`（v0.1.14 起）。
+- Node 最低门槛：**22.19+ / 24.x**（`SystemNodeLocator.MIN_NODE_MAJOR=22` / `MIN_NODE_MINOR=19`，v0.1.14 起跟 dsh `engines.node = "^22.19.0 || >=24.0.0"` 对齐）。旧 Node 18/20/22.0–22.18 直接在 `meetsMinimum()` 返回 false 并弹错误条，不会启动 dsh（避免出现"插件过 → workspace 不注入"的无报错场景）。
 
 ---
 

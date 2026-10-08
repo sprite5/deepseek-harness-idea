@@ -82,6 +82,42 @@
 
     <change-notes><![CDATA[
         <h3>English / 中文</h3>
+        <h4>v0.1.14</h4>
+        <ul>
+            <li>Bump bundled DeepSeek Harness runtime to <strong>0.2.0-rc.2</strong>
+            (<code>@earendil-works/pi-ai</code> 0.87.1, <code>@anthropic-ai/sdk</code> bumped to match the
+            rc.2 provider chain). Third-party plugin maintainers upstream report no runtime,
+            configuration, or tool-surface changes between 0.1.7-rc.2 and 0.2.0-rc.2, and
+            <code>@deepseek-ai/cordis</code> stays at <code>~4.0.4</code> and
+            <code>@deepseek-ai/schemastery</code> at <code>^3.18.4</code>, so the existing
+            <code>- insert:</code> patch, MCP, and per-project workspace seams remain valid.
+            Note: some older third-party model IDs were removed by the upstream catalog update,
+            so saved selections may need to be re-picked.</li>
+            <li>Raise minimum system Node.js to <strong>22.19+ (or 24.x)</strong> to satisfy dsh
+            0.2.0+ <code>engines.node</code> = <code>"^22.19.0 || &gt;=24.0.0"</code>. The previous
+            floor (Node 18/20) let the plugin block past older Node releases while dsh 0.2.0 itself
+            would refuse to start there, so users would see "DSH started but workspace not
+            injected" without a clear reason. <code>SystemNodeLocator</code> now exposes
+            <code>MIN_NODE_MAJOR</code> = 22 / <code>MIN_NODE_MINOR</code> = 19 and
+            <code>NodeInfo.meetsMinimum()</code> accepts Node 24+ or 22.19+; the tool-window error
+            banner and <code>missingMessage()</code> were updated accordingly.</li>
+        </ul>
+        <ul>
+            <li>升级内置 DeepSeek Harness 运行时到 <strong>0.2.0-rc.2</strong>
+            （<code>@earendil-works/pi-ai</code> 0.87.1、<code>@anthropic-ai/sdk</code> 跟随 rc.2
+            provider 链路）。上游多个第三方插件维护者确认 0.1.7-rc.2 → 0.2.0-rc.2 在 runtime /
+            configuration / tool-surface 上无破坏性变更；<code>@deepseek-ai/cordis</code> 保持
+            <code>~4.0.4</code>、<code>@deepseek-ai/schemastery</code> 保持 <code>^3.18.4</code>,
+            故现有 <code>- insert:</code> patch、MCP、每项目 workspace seam 全部继续有效。
+            注意:部分旧 model ID 被上游目录移除,已保存的模型选择可能需要重新选择。</li>
+            <li>系统 Node.js 最低版本提升到 <strong>22.19+(或 24.x)</strong>,对齐 dsh 0.2.0+
+            <code>engines.node</code> = <code>"^22.19.0 || &gt;=24.0.0"</code>。
+            旧门槛(Node 18/20)能让插件检查通过、但 dsh 0.2.0 本身会拒绝启动,用户看到的是
+            "DSH started but workspace not injected" 而无明确原因。
+            <code>SystemNodeLocator</code> 新增 <code>MIN_NODE_MAJOR</code> = 22 /
+            <code>MIN_NODE_MINOR</code> = 19,<code>NodeInfo.meetsMinimum()</code> 接受 Node 24+ 或
+            22.19+;工具窗口报错条与 <code>missingMessage()</code> 同步更新。</li>
+        </ul>
         <h4>v0.1.13.1</h4>
         <ul>
             <li>Restore cross-project sharing of third-party LLM providers

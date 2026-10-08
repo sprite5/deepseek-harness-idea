@@ -26,7 +26,7 @@ function opt(name, def) {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : def;
 }
 
-const dshVersion = opt('dsh-version', '0.1.7-rc.2');
+const dshVersion = opt('dsh-version', '0.2.0-rc.2');
 const hanuiVersion = opt('hanui-version', '0.2.5');
 const output = opt('output', path.join(root, 'build', 'dsh'));
 const registry = opt('registry', 'https://registry.npmmirror.com/');

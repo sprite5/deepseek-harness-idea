@@ -12,15 +12,23 @@ import java.nio.file.Path
  *   2. PATH 上的 `node` / `node.exe`
  *   3. 常见安装目录（Windows：Program Files\nodejs；macOS：Homebrew/opt；Linux：/usr/bin）
  *
- * 命中后校验版本 ≥ [MIN_NODE_MAJOR]（=20；sharp/koffi 用 NAPI v9，cordis 内部 API 需 ≥22 但有降级路径）。
+ * 命中后校验版本 ≥ [MIN_NODE_MAJOR].[MIN_NODE_MINOR]。
+ * 跟 dsh 0.2.0+ 对齐：dsh `package.json` 的 `engines.node` = `"^22.19.0 || >=24.0.0"`。
+ * 因此接受 Node 24+ 也 22.19+（22.18 及更早不通过）。
  * 任何步骤失败返回 null，调用方给出可操作报错（带安装指引）。
  */
 object SystemNodeLocator {
 
     private val LOG = Logger.getInstance(SystemNodeLocator::class.java)
 
-    /** 最低 Node.js 主版本号（20 LTS）。 */
-    const val MIN_NODE_MAJOR = 20
+    /** 最低 Node.js 主版本号（22 LTS，v0.1.14 起跟 dsh 0.2.0+ engines 对齐）。 */
+    const val MIN_NODE_MAJOR = 22
+
+    /** 最低 Node.js 次版本号（=19，dsh 0.2.0+ engines 要求 `^22.19.0`）。 */
+    const val MIN_NODE_MINOR = 19
+
+    /** 人类可读的最低版本串（用于错误信息）。 */
+    const val MIN_NODE_DISPLAY = "$MIN_NODE_MAJOR.$MIN_NODE_MINOR"
 
     /** 显式覆盖环境变量名。 */
     const val OVERRIDE_ENV = "DSH_IDEA_NODE"
@@ -29,11 +37,20 @@ object SystemNodeLocator {
      * 解析结果（路径 + 版本字符串）。
      */
     data class NodeInfo(val path: Path, val version: String) {
-        /** 主版本号（如 `v20.10.0` → 20）。 */
+        /** 主版本号（如 `v22.19.0` → 22）。 */
         val major: Int get() = version.removePrefix("v").substringBefore('.').toIntOrNull() ?: 0
 
-        /** 是否满足最低版本（≥ [MIN_NODE_MAJOR]）。 */
-        fun meetsMinimum(): Boolean = major >= MIN_NODE_MAJOR
+        /** 次版本号（如 `v22.19.0` → 19）；无法解析时为 0。 */
+        val minor: Int get() = version.removePrefix("v").substringAfter('.', "")
+            .substringBefore('.').substringBefore('-').toIntOrNull() ?: 0
+
+        /**
+         * 是否满足最低版本（跟 dsh `engines.node = ^22.19.0 || >=24.0.0` 对齐）。
+         * - major >= 24 → 通过
+         * - major == 22 且 minor >= MIN_NODE_MINOR → 通过
+         * - 其余 → 不通过
+         */
+        fun meetsMinimum(): Boolean = major >= 24 || (major == MIN_NODE_MAJOR && minor >= MIN_NODE_MINOR)
     }
 
     /**
@@ -64,7 +81,7 @@ object SystemNodeLocator {
 
     /** 友好错误信息（缺 node / 版本过低），调用方贴到 UI 报错。 */
     fun missingMessage(): String =
-        "DeepSeek Harness 需要系统 Node.js ≥ $MIN_NODE_MAJOR.\n" +
+        "DeepSeek Harness 需要系统 Node.js ≥ $MIN_NODE_DISPLAY（24.x 或 22.19+，与 dsh 0.2.0+ 的 engines 对齐）。\n" +
             "请安装 Node.js LTS（https://nodejs.org/），或把 node 路径写入环境变量 $OVERRIDE_ENV。"
 
     private fun probe(path: Path): NodeInfo? = try {

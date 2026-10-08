@@ -71,7 +71,7 @@
    拒绝 Web UI 的 set；见 §3.9 与 PROJECT_NOTES §4）。
 4. **Profile 合成**：`profiles/<name>/cordis.yml` 初始为 `[]`，由 bundle 层（`package.json` 的 `dsh.profile.bundles`）+ `cordis.patch.yml` 用户层 + `--patch` 覆盖层合成。插件以 `--patch <ide.yml>` 注入 mcp-client，不污染用户层。
 5. **MCP 客户端**：`@deepseek-ai/dsh-mcp-client` 支持 `transport: streamable-http`；每实例一个 serverName；模型侧工具名为 `mcp__<serverName>__<rawName>`（serverName 须匹配 `^[A-Za-z0-9_-]{1,32}$`）。其依赖 `@modelcontextprotocol/sdk` 存在于 profile 的 hoisted `node_modules`，可被插件附带的 MCP server 脚本 import（脚本置于 DSH_HOME 下按 node 向上查找规则解析）。
-6. **运行时**：固定 `@deepseek-ai/dsh@0.1.7-rc.2` + Node.js 24.x（Node 24 是 GitHub Actions runner LTS），随插件打包。
+6. **运行时**：固定 `@deepseek-ai/dsh@0.2.0-rc.2` + Node.js 24.x（Node 24 是 GitHub Actions runner LTS），随插件打包；插件对宿主系统 Node 的最低门槛提升到 **22.19+**（或 24.x），对齐 dsh `engines.node = "^22.19.0 || >=24.0.0"`。
 
 ## 3. 模块设计
 
@@ -115,7 +115,7 @@
 **构建期**（`scripts/build-runtime.ps1`，Gradle task `buildRuntime` 调用；已实现并实测通过）：
 
 1. 下载 Node.js 22.x win-x64（固定版本，SHA-256 校验）→ `<OutputDir>/node/`。
-2. 以 npm 安装 `@deepseek-ai/dsh@0.1.7-rc.2` 及其依赖到 `<OutputDir>/dsh/`（`--ignore-scripts --include=optional --include=dev`；
+2. 以 npm 安装 `@deepseek-ai/dsh@0.2.0-rc.2` 及其依赖到 `<OutputDir>/dsh/`（`--ignore-scripts --include=optional --include=dev`；
    `pi-ai` / `dsh-llm-pi-ai` 在 dsh 里是 devDeps，必须 `--include=dev` 才会装，否则 anthropic provider 链路会 ERR_MODULE_NOT_FOUND；
    win-x64 原生依赖均以 optionalDependencies 预编译产物提供，无需 postinstall）。
 3. 冒烟验证：读取 `dsh` 版本；`-Bundle` 时打包 `runtime-bundle.zip`（**zip 根直接为 `node/` + `dsh/`**，
@@ -545,3 +545,4 @@ PRD §7 验收清单 9 条（含 v0.1.3-dev 新增"DSH 一键解释"）。
 | 2026-08-23 | v0.1.3-dev | **设置页回显兜底：凭据文件读取**（用户实测"改后仍为空"）：PasswordSafe 读不到 key 时设置页回显为空。`DshCredentials.readApiKeyFromCredentialFile`（行级解析）＋ `readApiKeyWithFallback`（先 PasswordSafe，无则回退插件全局凭据文件，方案A真源）；设置页 `readStoredApiKey()` 用它。DshCredentialsMaskTest 增至 10 例 |
 | 2026-08-23 | v0.1.3-dev | **dsh Web UI 改 API key 也要全局生效**（用户要求+选B方案）：① 去掉 `DshProcessManager` 启动时注入的 `DEEPSEEK_API_KEY` 环境变量——dsh-credentials-local 的 `resolve()` 是 `inherited env wins`，注入 env 会使 dsh 永远读旧值，且 Web UI 改 key 被 `assertUnshadowed` 直接拒绝（源码 `dsh-credentials-local lib/index.js:636`）；② 新增 `DshCredentialsSync`（`WatchService` 监听各项目 DSH_HOME 凭据文件，dsh Web UI/Models page 以 `version:1 + refs.DEEPSEEK_API_KEY` 写入该文件 → 捕获 → 回写 PasswordSafe + 插件全局凭据文件）。**方案B 语义**：改 key 的那个 dsh 进程（去 env 后读文件层，该进程立即生效），其它项目**下次启动/重启**时 `syncCredentials()`/`ensureHome()` 从全局复制+透传 → 全局一致。监听器随项目 Disposable 释放（`DshCredentialsSync.release(projectName)`）。`onFileChanged` 仅当子项目 key 与全局不同才回写（无自激循环）。新增 DshCredentialsSyncTest 6 例 |
 | 2026-09-11 | v0.1.11 | 修复"DSH 一键解释"自动发送永远失败（用户截图报障）：v0.1.10 只把"发送选中代码"的 `injectToBrowser` 切到 Lexical composer 选择器，`sendQuestion` 的 `buildSendQuestionScript` 仍只查 `<textarea>` → dsh web ≥ 0.1.2 下必然 8s 超时回传 `no-composer` → 通知 "Auto-send failed; the log was copied to the clipboard."。现两条注入路径共用同一套选择器 + `readText`（contenteditable 用 `innerText`），回车派发到 composer 本体，写入无效才回传 `no-composer`（避免空草稿回车手势被误判成 submitted）；§3.11/§3.7 与 PROJECT_NOTES §3.4/§3.5 同步更新 |
+| 2026-10-08 | v0.1.14 | 跟随 dsh **0.2.0-rc.2** 升级（@deepseek-ai/dsh@0.2.0-rc.2，@earendil-works/pi-ai 0.87.1，@anthropic-ai/sdk 跟随 rc.2 链路）。第三方插件维护者多源交叉确认 0.1.7 → 0.2.0 在 cordis patch / 配置 schema / MCP / workspace RPC / Web UI 选择器上无破坏性变更（cordis ~4.0.4、schemastery ^3.18.4 不变），故本次只改 `DshHomeManager.DSH_VERSION` + `scripts/build-dsh.mjs` / `scripts/prepare-dsh-cache.mjs` / `scripts/build-runtime.ps1` / `.github/workflows/build-preview.yml` 的 `DSH_VERSION` 默认值；runtime 树仍显式带 `@modelcontextprotocol/sdk@1.30.0` + express（无变化）；`mobile bundle` / 裁剪列表（ui-sidebar-terminal、voice-input、agent-team、auto-review）/ `data-presented-files-row` 拦截 + Bridge `/open-file` / `workspace.json` 顺序推断 / Cordis patch `$settings`/`$credentials` 共享 / Web UI Lexical composer 选择器全部继续有效。**真雷**：旧插件 Node 门槛 18/20 与 dsh 0.2.0+ `engines.node = "^22.19.0 || >=24.0.0"` 不对齐，会出现"插件过 → dsh 不动 → workspace 没注入"的无报错场景。`SystemNodeLocator` 同步抬到 `MIN_NODE_MAJOR=22` / `MIN_NODE_MINOR=19` / `MIN_NODE_DISPLAY="22.19"`，`NodeInfo.meetsMinimum()` 接受 Node 24+ 或 22.19+；`missingMessage()` 与错误条同步更新；`README.md` 要求从 ">= v18" 改为 ">= 22.19（或 24.x）"。**待 IDE 复验**：§3.5 复验清单在 0.2.0-rc.2 上重跑（特别是 pi-ai 0.87.1 的 `@anthropic-ai/sdk` 链路 / `dsh-llm-pi-ai` 是否仍在 devDeps / 第三方模型目录移除旧 ID 后的 fallback 路径） |

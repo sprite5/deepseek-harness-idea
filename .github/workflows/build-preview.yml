@@ -14,7 +14,7 @@ permissions:
 env:
   JAVA_VERSION: '21'
   NPM_REGISTRY: 'https://registry.npmmirror.com/'
-  DSH_VERSION: '0.1.7-rc.2'
+  DSH_VERSION: '0.2.0-rc.2'
   HANUI_VERSION: '0.2.5'
 
 jobs:
