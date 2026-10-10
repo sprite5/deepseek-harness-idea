@@ -1091,6 +1091,13 @@ window.__ModuleLoader__.load({
         const onFocusIn = (e) => {
           const t = e.target
           if (!(t instanceof Element)) return
+          // Guard only the conversation composer. A popover field (the
+          // model-list search input) must keep focus: blurring it fires the
+          // popover's onBlur -> close(), so in the narrow mobile-shell
+          // viewport the model list never opens. The menu is portaled outside
+          // the composer root, so scoping to that root excludes it.
+          if (!t.closest(`.${INPUT.root}`)) return
+          if (t.closest('[role="menu"], [role="listbox"], [role="dialog"]')) return
           const isComposer = t.closest('textarea, input[type="text"], input:not([type]), [contenteditable="true"]')
           if (!isComposer) return
           // A focus within ~600ms of a real tap is user-intended — allow it.

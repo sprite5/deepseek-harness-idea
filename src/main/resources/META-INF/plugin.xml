@@ -82,6 +82,40 @@
 
     <change-notes><![CDATA[
         <h3>English / 中文</h3>
+        <h4>v0.1.14.2</h4>
+        <ul>
+            <li>Stop the <b>Preview Notice</b> ("预览版说明") from reappearing on every startup.
+            dsh 0.2 moved the acknowledgement out of <code>settings.yaml</code> into the profile
+            patch (<code>profiles/web/cordis.patch.yml</code>, entry <code>ui-settings-general</code>)
+            and renamed its notice version to <code>2026-09-28.1</code>. The plugin still pre-wrote the
+            old namespace/version (<code>ui-onboarding</code> / <code>2026-08-13.1</code>) into the global
+            <code>settings.yaml</code>, which is copied back into the project on every startup, so dsh
+            re-imported the stale value and re-showed the notice each launch — even after clicking
+            Continue. The acknowledgement version is now <code>2026-09-28.1</code> and is written under
+            <code>ui-settings-general</code>, and is refreshed idempotently so a stale value is corrected.</li>
+        </ul>
+        <ul>
+            <li>修复 <b>预览版说明</b>每次启动都弹出。dsh 0.2 把确认状态从 <code>settings.yaml</code> 挪到了
+            profile patch（<code>profiles/web/cordis.patch.yml</code> 的 <code>ui-settings-general</code> 条目），
+            并把声明版本改为 <code>2026-09-28.1</code>。插件此前仍向全局 <code>settings.yaml</code> 写入旧命名空间/旧版本
+            （<code>ui-onboarding</code> / <code>2026-08-13.1</code>），而该文件每次启动都会被复制回项目目录并被 dsh
+            重新导入，于是旧值反复覆盖用户点 Continue 写入的确认，导致声明每次启动重现。现改为写入
+            <code>ui-settings-general</code> 且版本为 <code>2026-09-28.1</code>，并做幂等刷新以纠正陈旧值。</li>
+        </ul>
+        <h4>v0.1.14.1</h4>
+        <ul>
+            <li>Fix the model picker in the narrow IDE tool window: tapping <b>模型 / Model</b>
+            (or <b>推理等级 / Effort</b>) closed the dropdown instead of opening the model list.
+            The mobile shell's soft-keyboard focus guard was blurring the dropdown's own search
+            field, and that programmatic blur fired the popover's <code>onBlur → close()</code>.
+            The guard is now scoped to the conversation composer, so popover fields keep focus.</li>
+        </ul>
+        <ul>
+            <li>修复窄视口 IDE 工具窗里的模型选择器：点击 <b>模型</b>（或 <b>推理等级</b>）时
+            下拉框直接关闭、模型列表打不开。原因是移动壳的软键盘焦点守卫把下拉框自带的搜索框
+            blur 掉，该程序化 blur 触发了弹出层的 <code>onBlur → close()</code>。
+            现把守卫限定在对话输入框内，弹出层内的输入框不再被误 blur。</li>
+        </ul>
         <h4>v0.1.14</h4>
         <ul>
             <li>Bump bundled DeepSeek Harness runtime to <strong>0.2.0-rc.2</strong>

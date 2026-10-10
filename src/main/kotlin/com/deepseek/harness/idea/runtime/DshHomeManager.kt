@@ -58,8 +58,12 @@ class DshHomeManager : Disposable {
         fun getInstance(): DshHomeManager =
             ApplicationManager.getApplication().getService(DshHomeManager::class.java)
 
-        /** dsh 内测声明 acknowledge 版本（与 dsh 源码 WELCOME_NOTICE_VERSION 一致；变化需同步）。 */
-        const val WELCOME_NOTICE_VERSION = "2026-08-13.1"
+        /**
+         * dsh 欢迎/预览声明 acknowledge 版本，须与 dsh 源码 `WELCOME_NOTICE_VERSION`
+         * （`@deepseek-ai/dsh-client-ui-settings-models` 的 onboarding-copy）**完全一致**；
+         * dsh 用「精确相等」判断是否已确认，故上游 bump 后此处必须同步，否则声明会反复弹出。
+         */
+        const val WELCOME_NOTICE_VERSION = "2026-09-28.1"
     }
 
     /** 运行时根目录（node/ + dsh/ 的父目录）。 */
@@ -249,12 +253,38 @@ class DshHomeManager : Disposable {
         DshCredentials.writeRefs(dest, merged)
     }
 
-    /** 预写全局 settings.yaml：ui-onboarding.welcomeNoticeVersion = 已接受版本（文件已存在则不覆盖）。 */
+    /**
+     * 预写/校正全局 settings.yaml 的欢迎声明 acknowledge 版本。
+     *
+     * dsh 0.2 起 settings.yaml 不再是活的设置文档，只作「遗留导入源」：启动时 dsh 把它导入活动
+     * profile（写进 `profiles/web/cordis.patch.yml` 的 `ui-settings-general` 条目），随后重命名为
+     * `settings.yaml.imported`。插件每次启动都会把全局 settings.yaml 复制回项目目录
+     * （见 [copyGlobalConfigTo]），所以这里必须始终写入**当前** dsh 期望的版本号；否则 dsh 每次启动
+     * 都会用陈旧版本覆盖用户在 Web UI 点 Continue 写入的 acknowledge，导致「预览版说明」反复弹出。
+     */
     private fun prefillAcknowledgeWelcomeNotice() {
         val f = globalConfigHome().resolve("settings.yaml")
-        if (Files.exists(f)) return
-        writeUtf8(f, "ui-onboarding:\n  welcomeNoticeVersion: \"$WELCOME_NOTICE_VERSION\"\n")
-        LOG.info("prefilled settings.yaml welcomeNoticeVersion=$WELCOME_NOTICE_VERSION")
+        // dsh 0.2 的 settings 命名空间 id；旧 id 为 ui-onboarding（dsh 会按别名映射到同一 entry）。
+        val section = "ui-settings-general"
+        try {
+            if (Files.exists(f)) {
+                val text = Files.readString(f, StandardCharsets.UTF_8)
+                if (text.contains("welcomeNoticeVersion") &&
+                    (text.contains("\"$WELCOME_NOTICE_VERSION\"") ||
+                        text.contains("welcomeNoticeVersion: $WELCOME_NOTICE_VERSION"))
+                ) {
+                    return // 已是当前版本，保留文件其它内容
+                }
+            }
+            writeUtf8(
+                f,
+                "$section:\n  welcomeNoticeVersion: \"$WELCOME_NOTICE_VERSION\"\n" +
+                    "ui-onboarding:\n  welcomeNoticeVersion: \"$WELCOME_NOTICE_VERSION\"\n",
+            )
+            LOG.info("prefilled settings.yaml welcomeNoticeVersion=$WELCOME_NOTICE_VERSION")
+        } catch (e: Exception) {
+            LOG.warn("failed to prefill settings.yaml welcome notice version", e)
+        }
     }
 
     /**
